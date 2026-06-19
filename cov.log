@@ -1,0 +1,97 @@
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mD:/codes/luban-workspace/.worktrees/luban-ai-assistant-plan1/packages/engine/luban[39m
+      [2mCoverage enabled with [22m[33mv8[39m
+
+ [32m✓[39m src/views/page/components/__tests__/schemaTree.spec.ts [2m([22m[2m26 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m✓[39m src/utils/publicPage.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 5[2mms[22m[39m
+ [32m✓[39m src/api/__tests__/ai.spec.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 12[2mms[22m[39m
+ [32m✓[39m src/__tests__/featuregates.spec.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m✓[39m src/stores/__tests__/ai.spec.ts [2m([22m[2m9 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32m✓[39m src/api/request.spec.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m✓[39m src/composables/__tests__/usePageEditorApi.spec.ts [2m([22m[2m11 tests[22m[2m)[22m[90m 12[2mms[22m[39m
+ [32m✓[39m src/composables/__tests__/useHistory.spec.ts [2m([22m[2m9 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [32m✓[39m src/__tests__/router.spec.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m✓[39m src/stores/user.spec.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 8[2mms[22m[39m
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+DEPRECATION WARNING [legacy-js-api]: The legacy JS API is deprecated and will be removed in Dart Sass 2.0.0.
+
+More info: https://sass-lang.com/d/legacy-js-api
+
+ [32m✓[39m src/views/page/__tests__/PageEditor.spec.ts [2m([22m[2m7 tests[22m[2m)[22m[90m 212[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m11 passed[39m[22m[90m (11)[39m
+[2m      Tests [22m [1m[32m83 passed[39m[22m[90m (83)[39m
+[2m   Start at [22m 17:20:33
+[2m   Duration [22m 3.76s[2m (transform 938ms, setup 0ms, collect 3.14s, tests 297ms, environment 12.12s, prepare 2.32s)[22m
+
+[34m % [39m[2mCoverage report from [22m[33mv8[39m
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |   40.54 |    66.66 |   48.32 |   40.54 |                   
+ src               |   34.09 |       40 |      60 |   34.09 |                   
+  App.vue          |       0 |        0 |       0 |       0 | 1-5               
+  featuregates.ts  |   93.75 |       50 |     100 |   93.75 | 21                
+  main.ts          |       0 |        0 |       0 |       0 | 1-29              
+ src/api           |   41.12 |    46.15 |      50 |   41.12 |                   
+  ai.ts            |   88.88 |    53.57 |     100 |   88.88 | ...20,126-128,142 
+  auth.ts          |       0 |        0 |       0 |       0 | 1-23              
+  form.ts          |       0 |        0 |       0 |       0 | 1-46              
+  lead.ts          |       0 |        0 |       0 |       0 | 1-80              
+  page.ts          |       0 |        0 |       0 |       0 | 1-50              
+  request.ts       |   59.45 |       75 |     100 |   59.45 | 26-31,36-44       
+  settings.ts      |       0 |        0 |       0 |       0 | 1-17              
+  site.ts          |       0 |        0 |       0 |       0 | 1-31              
+  user.ts          |       0 |        0 |       0 |       0 | 1-46              
+ src/composables   |   86.39 |    60.41 |   90.47 |   86.39 |                   
+  useHistory.ts    |     100 |    92.85 |     100 |     100 | 76                
+  ...eEditorApi.ts |   82.17 |    47.05 |   86.66 |   82.17 | ...36-146,160-165 
+ src/layouts       |       0 |        0 |       0 |       0 |                   
+  ...ultLayout.vue |       0 |        0 |       0 |       0 | 1-107             
+  LoginLayout.vue  |       0 |        0 |       0 |       0 | 1-9               
+ src/router        |   87.36 |      100 |       0 |   87.36 |                   
+  index.ts         |   87.36 |      100 |       0 |   87.36 | 85-96             
+ src/stores        |   78.26 |    78.94 |      75 |   78.26 |                   
+  ai.ts            |     100 |      100 |     100 |     100 |                   
+  index.ts         |       0 |        0 |       0 |       0 | 1                 
+  page.ts          |       0 |        0 |       0 |       0 | 1-19              
+  site.ts          |       0 |        0 |       0 |       0 | 1-18              
+  user.ts          |     100 |    83.33 |     100 |     100 | 16                
+ src/test          |     100 |    70.58 |    90.9 |     100 |                   
+  ...owCodeStub.ts |     100 |    70.58 |    90.9 |     100 | 82,88-91,115-116  
+ src/utils         |    60.6 |    66.66 |   66.66 |    60.6 |                   
+  datetime.ts      |       0 |        0 |       0 |       0 | 1-15              
+  publicPage.ts    |   95.23 |       75 |     100 |   95.23 | 26                
+ src/views         |       0 |        0 |       0 |       0 |                   
+  Dashboard.vue    |       0 |        0 |       0 |       0 | 1-59              
+  Login.vue        |       0 |        0 |       0 |       0 | 1-50              
+ src/views/lead    |       0 |        0 |       0 |       0 |                   
+  LeadDetail.vue   |       0 |        0 |       0 |       0 | 1-213             
+  LeadList.vue     |       0 |        0 |       0 |       0 | 1-302             
+ src/views/page    |   55.16 |    71.42 |    40.9 |   55.16 |                   
+  PageEditor.vue   |   73.48 |    72.58 |   42.85 |   73.48 | ...70,277,280-281 
+  PageList.vue     |       0 |        0 |       0 |       0 | 1-122             
+ ...age/components |   63.65 |       81 |   33.33 |   63.65 |                   
+  ...tantPanel.vue |   49.28 |    66.66 |   11.11 |   49.28 | 53-56,60-136      
+  ...onentTree.vue |   70.54 |    57.14 |      50 |   70.54 | ...14-115,118-151 
+  ...ertyPanel.vue |   56.28 |       90 |       0 |   56.28 | 60-61,65-168      
+  schemaTree.ts    |     100 |    92.85 |     100 |     100 | 25,61,113,118     
+ ...views/settings |       0 |        0 |       0 |       0 |                   
+  Settings.vue     |       0 |        0 |       0 |       0 | 1-84              
+ src/views/site    |       0 |        0 |       0 |       0 |                   
+  SiteDetail.vue   |       0 |        0 |       0 |       0 | 1-47              
+  SiteList.vue     |       0 |        0 |       0 |       0 | 1-132             
+ src/views/user    |       0 |        0 |       0 |       0 |                   
+  UserList.vue     |       0 |        0 |       0 |       0 | 1-227             
+-------------------|---------|----------|---------|---------|-------------------

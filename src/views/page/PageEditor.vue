@@ -48,14 +48,15 @@ import {
   LubanPage,
   getComponentMeta,
   getPaletteGroups,
-  reorderRootChildren,
-  isContainerType,
 } from 'luban-low-code'
 import PropertyPanel from './components/PropertyPanel.vue'
 import ComponentTree from './components/ComponentTree.vue'
-import { findNode, findParent, removeNode, moveChild, moveNodeAcross } from './components/schemaTree'
+import { findNode } from './components/schemaTree'
 import { useHistory } from '@/composables/useHistory'
 import { useKeyboard } from '@/composables/useKeyboard'
+import { useFeatureGate } from '@/composables/useFeatureGate'
+import { usePageEditorApi } from '@/composables/usePageEditorApi'
+import AiAssistantPanel from './components/AiAssistantPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -69,8 +70,9 @@ const pageStatus = ref<string>('draft')
 const schema = ref<PageSchema | null>(null)
 /** 当前 site 的数据源列表（PropertyPanel 数据源区消费）。 */
 const datasources = ref<Array<{ id: string; name: string }>>([])
-/** 预览时数据源拉取器（传给 LubanPage 注入表达式上下文） */
-const datasourceFetcher = (id: string) => queryDatasource(id).then((r) => r.data)
+/** 预览时数据源拉取器（传给 LubanPage 注入表达式上下文）；透传 node.datasource.params。 */
+const datasourceFetcher = (id: string, params?: Record<string, unknown>) =>
+  queryDatasource(id, params).then((r) => r.data)
 const loading = ref(false)
 const saving = ref(false)
 const publishing = ref(false)
@@ -84,13 +86,30 @@ const isDesign = ref(true)
 /** 撤销/重做历史栈（结构变更与属性变更均入栈；属性输入噪声由 limit 截断兜底）。 */
 const history = useHistory(schema)
 const { canUndo, canRedo } = history
-useKeyboard({
-  undo: () => history.undo(),
-  redo: () => history.redo(),
-  save: () => handleSave(),
-  delete: () => { if (selectedId.value) onDeleteNode(selectedId.value) },
-  duplicate: () => { if (selectedId.value) onDuplicateNode(selectedId.value) },
-})
+const { isEnabled } = useFeatureGate()
+const featureUndo = isEnabled('editor.undo')
+const featureShortcuts = isEnabled('editor.shortcuts')
+
+/**
+ * 画布操作收口（plan P1-T8）：所有 schema mutation 经 api，撤销栈语义统一。
+ * AI 面板（AiAssistantPanel）与用户操作共享同一 schema + 撤销栈 ——
+ * AI 改动可被 Ctrl+Z 撤销（plan §3 验收口径）。
+ */
+const api = usePageEditorApi({ schema, history, selectedId })
+
+/** AI 助手面板开关（FeatureGate ai.assistant 关则隐藏入口，编辑器回归原状）。 */
+const featureAiAssistant = isEnabled('ai.assistant')
+const aiPanelOpen = ref(false)
+
+if (featureShortcuts) {
+  useKeyboard({
+    undo: () => history.undo(),
+    redo: () => history.redo(),
+    save: () => handleSave(),
+    delete: () => { if (selectedId.value) api.deleteNode(selectedId.value) },
+    duplicate: () => { if (selectedId.value) api.duplicateNode(selectedId.value) },
+  })
+}
 
 /** 物料面板分组（一次性派生；物料注册在 luban-low-code side-effect import 完成）。 */
 const paletteGroups = computed(() => getPaletteGroups())
@@ -110,18 +129,6 @@ function statusTagType(status: string): 'success' | 'info' | 'warning' | 'danger
   if (status === 'published') return 'success'
   if (status === 'draft') return 'info'
   return 'warning'
-}
-
-/** crypto.randomUUID 在浏览器与 jsdom 新版本可用；加兜底以防旧环境。 */
-function genId(prefix = 'n'): string {
-  try {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID()
-    }
-  } catch {
-    /* noop */
-  }
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
 /** 给 ComponentTree 注入的 label 解析：优先用 meta.label，回退 type。 */
@@ -150,6 +157,9 @@ async function loadPage() {
         root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
       }
     }
+    // R4a: clear the undo/redo stack on page switch so Ctrl+Z can't cross into
+    // the previous page's schema (data-safety: history is per-page, not global).
+    history.reset()
   } catch (e) {
     // 不再静默回退；记录错误供 UI 显示重试卡片。
     loadError.value = (e as Error)?.message || '加载页面失败'
@@ -230,129 +240,9 @@ function goBack() {
 }
 
 // === LubanDesigner / 组件树事件 ===
-
-function onSelect(id: string | null): void {
-  selectedId.value = id
-}
-
-/**
- * 新增节点。parentId 未传或不存在时追加到 root.children；
- * 否则追加到对应容器的 children（仅当该 type 接受子节点）。
- * 新节点 props 由 meta.defaultProps 派生（无 meta 则空对象）。
- */
-function onAddNode(type: string, parentId?: string): void {
-  if (!schema.value?.root) return
-  history.push()
-  const meta = getComponentMeta(type)
-  const defaultProps: Record<string, unknown> = meta?.defaultProps
-    ? { ...meta.defaultProps }
-    : {}
-  const node: NodeSchema = {
-    id: genId(type),
-    type,
-    props: defaultProps,
-  }
-  // 容器类型默认给空 children 数组，便于后续 drop
-  if (isContainerType(type)) {
-    node.children = []
-  }
-
-  let host: NodeSchema | null = schema.value.root
-  if (parentId) {
-    const found = findNode(schema.value.root, parentId)
-    if (found && isContainerType(found.type)) {
-      host = found
-    }
-  }
-  if (!host.children) host.children = []
-  host.children.push(node)
-  selectedId.value = node.id
-}
-
-/**
- * LubanDesigner Sortable onEnd 触发的 root 级重排。
- * fromIdx/toIdx 均为 root.children 索引。
- */
-function onReorder(fromIdx: number, toIdx: number): void {
-  if (!schema.value) return
-  history.push()
-  reorderRootChildren(schema.value, fromIdx, toIdx)
-}
-
-/** 跨容器拖拽：moveNodeAcross 把节点移到目标容器（null=root 级），入撤销栈。 */
-function onMoveNode(nodeId: string, _fromParentId: string | null, toParentId: string | null, toIdx: number): void {
-  if (!schema.value?.root) return
-  history.push()
-  moveNodeAcross(schema.value.root, nodeId, toParentId, toIdx)
-}
-
-/** 属性面板回写 props。 */
-function onUpdateProp(nodeId: string, key: string, value: unknown): void {
-  if (!schema.value?.root) return
-  const node = findNode(schema.value.root, nodeId)
-  if (!node) return
-  history.push()
-  if (!node.props) node.props = {}
-  node.props[key] = value
-}
-
-/** 属性面板事件分区回写：写 node.events[eventName]，入撤销栈。 */
-function onUpdateEvent(nodeId: string, eventName: string, actionExpr: string): void {
-  if (!schema.value?.root) return
-  const node = findNode(schema.value.root, nodeId)
-  if (!node) return
-  history.push()
-  if (!node.events) node.events = {}
-  node.events[eventName] = actionExpr
-}
-
-/** 属性面板数据源分区回写：写 node.datasource，入撤销栈。 */
-function onUpdateDatasource(nodeId: string, ds: { id: string; varName: string } | null): void {
-  if (!schema.value?.root) return
-  const node = findNode(schema.value.root, nodeId)
-  if (!node) return
-  history.push()
-  node.datasource = ds ?? undefined
-}
-
-/** 删除节点：root 不可删；删后清空选中。 */
-function onDeleteNode(nodeId: string): void {
-  if (!schema.value?.root) return
-  if (schema.value.root.id === nodeId) return
-  history.push()
-  const ok = removeNode(schema.value.root, nodeId)
-  if (ok && selectedId.value === nodeId) {
-    selectedId.value = null
-  }
-}
-
-/** 复制节点（属性面板 emit duplicate）。 */
-function onDuplicateNode(nodeId: string): void {
-  if (!schema.value?.root) return
-  history.push()
-  const node = findNode(schema.value.root, nodeId)
-  const parent = findParent(schema.value.root, nodeId)
-  if (!node || !parent || !parent.children) return
-  // 浅克隆（深克隆 children 以免共享引用）
-  const clone: NodeSchema = JSON.parse(JSON.stringify(node))
-  clone.id = genId(node.type)
-  const idx = parent.children.findIndex((c) => c.id === nodeId)
-  parent.children.splice(idx + 1, 0, clone)
-  selectedId.value = clone.id
-}
-
-/**
- * 组件树上移/下移：parentId 为 null 表示 root 级。
- * schemaTree.moveChild 的约定（parent:null ⟺ root 级）。
- */
-function onMove(parentId: string | null, fromIdx: number, toIdx: number): void {
-  if (!schema.value?.root) return
-  history.push()
-  const parent = parentId ? findNode(schema.value.root, parentId) : null
-  // parent===null 且 parentId===null → root 级；其它情况 parent 必须命中
-  if (parentId && !parent) return
-  moveChild(parent, schema.value.root, fromIdx, toIdx)
-}
+// 所有 schema mutation 已收口到 usePageEditorApi（api.*）。
+// 模板事件绑定直接委托 api.select/addNode/reorder/moveNode/updateProp/updateEvent/
+// updateDatasource/deleteNode/duplicateNode/move（见 template）。
 
 // === 物料拖拽（左侧 → 画布） ===
 
@@ -396,7 +286,7 @@ watch(siteId, loadDatasources)
             {{ pageStatus === 'published' ? '已发布' : '草稿' }}
           </ElTag>
         </ElFormItem>
-        <ElFormItem>
+        <ElFormItem v-if="featureUndo">
           <ElButton
             :disabled="!canUndo"
             title="撤销 (Ctrl+Z)"
@@ -429,6 +319,16 @@ watch(siteId, loadDatasources)
             发布
           </ElButton>
           <ElButton @click="goBack">返回列表</ElButton>
+          <!-- AI 助手入口（FeatureGate ai.assistant 关则隐藏，编辑器回归原状 plan §6.5） -->
+          <ElButton
+            v-if="featureAiAssistant"
+            type="primary"
+            plain
+            title="AI 助手：自然语言生成/编辑页面"
+            @click="aiPanelOpen = true"
+          >
+            ✨ AI 助手
+          </ElButton>
         </ElFormItem>
       </ElForm>
     </ElCard>
@@ -468,10 +368,10 @@ watch(siteId, loadDatasources)
           :design-mode="true"
           :show-toolbar="false"
           placeholder="从左侧拖拽组件到此处"
-          @select="onSelect"
-          @add-node="onAddNode"
-          @reorder="onReorder"
-          @move-node="onMoveNode"
+          @select="api.select"
+          @add-node="api.addNode"
+          @reorder="api.reorder"
+          @move-node="api.moveNode"
         />
         <LubanPage v-else :schema="schema" :datasource-fetcher="datasourceFetcher" />
       </ElMain>
@@ -481,23 +381,35 @@ watch(siteId, loadDatasources)
           :schema="schema"
           :selected-id="selectedId"
           :get-label="getLabel"
-          @select="onSelect"
-          @delete="onDeleteNode"
-          @move="onMove"
+          @select="api.select"
+          @delete="api.deleteNode"
+          @move="api.move"
         />
         <div class="page-editor__right-divider" />
         <PropertyPanel
           :node="selectedNode"
           :meta="selectedMeta"
           :datasources="datasources"
-          @update:prop="onUpdateProp"
-          @update:event="onUpdateEvent"
-          @update:datasource="onUpdateDatasource"
-          @delete="onDeleteNode"
-          @duplicate="onDuplicateNode"
+          @update:prop="api.updateProp"
+          @update:event="api.updateEvent"
+          @update:datasource="api.updateDatasource"
+          @delete="api.deleteNode"
+          @duplicate="api.duplicateNode"
         />
       </ElAside>
     </ElContainer>
+
+    <!-- AI 助手右侧抽屉浮层（零侵入：不破坏三栏 flex，叠加在右侧 ElAside 之上 plan §4.3）。
+         AI 改动经 api（usePageEditorApi）落地，自动入撤销栈，可 Ctrl+Z 撤销。 -->
+    <AiAssistantPanel
+      v-if="featureAiAssistant"
+      v-model="aiPanelOpen"
+      :site-id="siteId"
+      :page-id="pageId"
+      :schema="schema"
+      :api="api"
+      :selected-id="selectedId"
+    />
   </div>
 </template>
 

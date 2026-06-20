@@ -27,6 +27,7 @@ import {
 } from 'element-plus'
 import type { NodeSchema } from '@/types/schema'
 import type { ComponentMeta, PropSchemaItem } from 'luban-low-code'
+import { useFeatureGate } from '@/composables/useFeatureGate'
 
 interface DatasourceOption {
   id: string
@@ -55,6 +56,11 @@ const emit = defineEmits<{
   (e: 'delete', nodeId: string): void
   (e: 'duplicate', nodeId: string): void
 }>()
+
+// FeatureGate §6.5: 数据源/事件分区可按开关隐藏（回滚链依赖）。
+const { isEnabled: isFeatureEnabled } = useFeatureGate()
+const featureDatasource = isFeatureEnabled('editor.datasource')
+const featureEvents = isFeatureEnabled('editor.events')
 
 /** 有序的 propSchema 条目，便于稳定渲染。 */
 const schemaEntries = computed<Array<[string, PropSchemaItem]>>(() => {
@@ -348,7 +354,7 @@ function handleVarNameChange(varName: string): void {
       </ElFormItem>
 
       <!-- 事件分区：按 meta.events 配动作表达式（W1-T5） -->
-      <ElFormItem v-if="eventNames.length" label="事件动作">
+      <ElFormItem v-if="featureEvents && eventNames.length" label="事件动作">
         <div class="property-panel__events">
           <div v-for="ev in eventNames" :key="ev" class="property-panel__event-row">
             <span class="property-panel__event-name">{{ ev }}</span>
@@ -363,7 +369,7 @@ function handleVarNameChange(varName: string): void {
       </ElFormItem>
 
       <!-- 数据源分区：绑 datasource + varName（W1-T5） -->
-      <ElFormItem v-if="datasources.length" label="数据源">
+      <ElFormItem v-if="featureDatasource && datasources.length" label="数据源">
         <div class="property-panel__datasource">
           <ElSelect
             :model-value="getCurrentDatasourceId()"

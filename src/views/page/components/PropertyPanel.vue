@@ -24,6 +24,11 @@ import {
   ElOption,
   ElButton,
   ElEmpty,
+  ElColorPicker,
+  ElCollapse,
+  ElCollapseItem,
+  ElRadioGroup,
+  ElRadio,
 } from 'element-plus'
 import type { NodeSchema } from '@/types/schema'
 import type { ComponentMeta, PropSchemaItem } from 'luban-low-code'
@@ -40,6 +45,8 @@ interface Props {
   /** 当前 site 可用的数据源列表（PageEditor 加载传入） */
   datasources?: DatasourceOption[]
   readonly?: boolean
+  /** V2-T4 当前断点：决定样式分区写入 node.style（desktop）还是 node.responsive[bp] */
+  breakpoint?: ResponsiveBreakpoint
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -47,7 +54,14 @@ const props = withDefaults(defineProps<Props>(), {
   meta: null,
   datasources: () => [],
   readonly: false,
+  breakpoint: 'desktop',
 })
+
+/** V2-T7 collection 选项（id + name） */
+interface CollectionOption {
+  id: string
+  name: string
+}
 
 const emit = defineEmits<{
   (e: 'update:prop', nodeId: string, key: string, value: unknown): void
@@ -55,6 +69,16 @@ const emit = defineEmits<{
   (e: 'update:datasource', nodeId: string, datasource: { id: string; varName: string } | null): void
   (e: 'delete', nodeId: string): void
   (e: 'duplicate', nodeId: string): void
+  /** D15-B1：打开数据源管理弹窗 */
+  (e: 'open-datasource'): void
+  /** D15-B1：测试指定数据源连通 */
+  (e: 'test-connect', datasourceId: string): void
+  /** D15-A3：节点级样式更新（key 为 CSS 属性名，value 为值） */
+  (e: 'update:style', nodeId: string, key: string, value: string): void
+  /** V2-T5：节点动画更新（key 为 animation 字段名，value 为值） */
+  (e: 'update:animation', nodeId: string, key: string, value: unknown): void
+  /** V2-T7：节点 CMS 绑定更新（整体 cmsBinding 已写回 node） */
+  (e: 'update:cms-binding', nodeId: string): void
 }>()
 
 // FeatureGate §6.5: 数据源/事件分区可按开关隐藏（回滚链依赖）。
@@ -148,6 +172,54 @@ function commitOptions(key: string, list: OptionItem[]): void {
   handleInput(key, list.map((o) => ({ label: o.label, value: o.value })))
 }
 
+// === array 类型：可视化数组编辑器（D15-E0 engine 消费侧）===
+// itemFields 由 compat.ts 从 JSONSchema items.properties 派生；按 itemFields
+// 渲染每行 N 字段输入，复用 options 编辑器的增删行模式。
+interface ArrayRow {
+  [field: string]: unknown
+}
+
+/** 读取数组当前行列表（归一化为对象数组；非数组/空 → []）。 */
+function getArrayItems(key: string): ArrayRow[] {
+  const raw = nodeProps.value[key]
+  if (!Array.isArray(raw)) return []
+  return raw.map((r) => {
+    if (r && typeof r === 'object') return r as ArrayRow
+    return { value: r }
+  })
+}
+
+/** 按 itemFields 默认值构造一行。 */
+function defaultArrayRow(itemFields?: PropSchema): ArrayRow {
+  const row: ArrayRow = {}
+  if (itemFields) {
+    for (const [k, f] of Object.entries(itemFields) as [string, PropSchemaItem][]) {
+      row[k] = f.default ?? (f.type === 'number' ? 0 : f.type === 'boolean' ? false : '')
+    }
+  }
+  return row
+}
+
+function addArrayItem(key: string, itemFields?: PropSchema): void {
+  const list = getArrayItems(key)
+  list.push(defaultArrayRow(itemFields))
+  handleInput(key, list)
+}
+
+function removeArrayItem(key: string, index: number): void {
+  const list = getArrayItems(key)
+  if (index < 0 || index >= list.length) return
+  list.splice(index, 1)
+  handleInput(key, list)
+}
+
+function updateArrayItem(key: string, index: number, field: string, val: unknown): void {
+  const list = getArrayItems(key)
+  if (index < 0 || index >= list.length) return
+  list[index] = { ...list[index], [field]: val }
+  handleInput(key, list)
+}
+
 // === json 类型：textarea + 解析容错 ===
 function getJsonText(key: string): string {
   const v = nodeProps.value[key]
@@ -171,6 +243,174 @@ function handleJsonInput(key: string, text: string): void {
     }
   }
   handleInput(key, parsed)
+}
+
+// === 样式分区（D15-A3，W1-T7）：节点级 style 配置 ===
+/**
+ * V2-T4：样式分区标题携带当前断点提示。
+ * desktop = "样式"；tablet/mobile = "样式（平板）"/"样式（手机）"。
+ */
+const styleSectionLabel = computed(() => {
+  if (!responsiveEnabled) return '样式';
+  const bpLabel: Record<ResponsiveBreakpoint, string> = {
+    desktop: '样式',
+    tablet: '样式（平板）',
+    mobile: '样式（手机）',
+  };
+  return bpLabel[props.breakpoint];
+});
+
+/**
+ * 危险 CSS 值过滤（§8.2 安全 A03）：拒绝 expression()/javascript:/url(javascript:)
+ * 等可能在旧浏览器执行的注入向量。值在写入 node.style 前先过此函数。
+ */
+const DANGEROUS_CSS_PATTERNS = [
+  /expression\s*\(/i,
+  /javascript:/i,
+  /url\s*\(\s*['"]?\s*javascript:/i,
+  /-moz-binding/i,
+  /behavior\s*:/i,
+]
+function isSafeCssValue(value: string): boolean {
+  if (typeof value !== 'string') return false
+  for (const re of DANGEROUS_CSS_PATTERNS) {
+    if (re.test(value)) return false
+  }
+  return true
+}
+
+/**
+ * V2-T4：按当前断点定位样式源对象。
+ * desktop → node.style（基础）；tablet/mobile → node.responsive[bp]（惰性初始化）。
+ * 返回引用，调用方直接写键值；新增的对象会挂回 node.responsive。
+ */
+function resolveStyleTarget(): Record<string, string> | null {
+  if (!props.node) return null;
+  if (props.breakpoint === 'desktop') {
+    if (!props.node.style) props.node.style = {};
+    return props.node.style;
+  }
+  // tablet/mobile
+  if (!props.node.responsive) props.node.responsive = {};
+  const bp = props.breakpoint;
+  if (bp === 'tablet') {
+    if (!props.node.responsive.tablet) props.node.responsive.tablet = {};
+    return props.node.responsive.tablet;
+  }
+  if (!props.node.responsive.mobile) props.node.responsive.mobile = {};
+  return props.node.responsive.mobile;
+}
+
+/** 读取节点某 CSS 属性值（按当前断点：desktop=style，其它=responsive[bp]）。 */
+function getStyleValue(key: string): string {
+  if (!props.node) return '';
+  if (props.breakpoint === 'desktop') {
+    return (props.node.style?.[key] as string) ?? '';
+  }
+  const r = props.node.responsive;
+  if (!r) return '';
+  const bpStyles = props.breakpoint === 'tablet' ? r.tablet : r.mobile;
+  return (bpStyles?.[key] as string) ?? '';
+}
+
+/**
+ * 写入节点 CSS 属性（按当前断点）：安全过滤后写，emit update:style。
+ * desktop → node.style；tablet/mobile → node.responsive[bp]。
+ * 危险值静默丢弃（不写不 emit）。
+ */
+function handleStyleInput(key: string, value: string): void {
+  if (!props.node) return;
+  if (value && !isSafeCssValue(value)) return; // 危险值拒绝
+  const target = resolveStyleTarget();
+  if (!target) return;
+  if (value === '') {
+    delete target[key];
+  } else {
+    target[key] = value;
+  }
+  emit('update:style', props.node.id, key, value);
+}
+
+/** 预设阴影选项（boxShadow） */
+const SHADOW_PRESETS = [
+  { label: '无', value: '' },
+  { label: '小', value: '0 1px 3px rgba(0,0,0,0.12)' },
+  { label: '中', value: '0 4px 12px rgba(0,0,0,0.15)' },
+  { label: '大', value: '0 10px 30px rgba(0,0,0,0.2)' },
+]
+
+// === V2-T5 动画分区 ===
+const ANIMATION_TYPES: { label: string; value: AnimationType }[] = [
+  { label: '淡入 (fade)', value: 'fade' },
+  { label: '上滑 (slide-up)', value: 'slide-up' },
+  { label: '左滑 (slide-left)', value: 'slide-left' },
+  { label: '缩放 (zoom)', value: 'zoom' },
+  { label: '翻转 (flip)', value: 'flip' },
+]
+const ANIMATION_TRIGGERS: { label: string; value: AnimationTrigger }[] = [
+  { label: '进入视口 (in-view)', value: 'in-view' },
+  { label: '悬停 (hover)', value: 'hover' },
+  { label: '加载 (load)', value: 'load' },
+]
+
+/** V2-T5 物料能力约束：若物料声明了 animationTriggers，仅显示声明的 trigger；
+ * 未声明则全部显示（向后兼容） */
+const availableTriggers = computed(() => {
+  const allowed = props.meta?.capabilities?.animationTriggers
+  if (!allowed || allowed.length === 0) return ANIMATION_TRIGGERS
+  return ANIMATION_TRIGGERS.filter((t) => allowed.includes(t.value))
+})
+
+function getAnimValue(key: string): unknown {
+  return props.node?.animation?.[key as keyof typeof props.node.animation]
+}
+
+/** 写入节点 animation 字段：惰性初始化 animation 对象，emit update:animation */
+function handleAnimInput(key: string, value: unknown): void {
+  if (!props.node) return
+  if (!props.node.animation) props.node.animation = {}
+  ;(props.node.animation as Record<string, unknown>)[key] = value
+  emit('update:animation', props.node.id, key, value)
+}
+
+/** 清除动画配置（type 设空即视为无动画，渲染零输出） */
+function clearAnimation(): void {
+  if (!props.node) return
+  if (!props.node.animation) return
+  props.node.animation = undefined
+  emit('update:animation', props.node.id, 'type', undefined)
+}
+
+// === V2-T7 CMS 绑定分区 ===
+/** 当前节点绑定的 collectionId / fieldKey / mode（v-model 友好） */
+const cmsCollectionId = computed<string>({
+  get: () => props.node?.cmsBinding?.collectionId ?? '',
+  set: (v: string) => setCmsField('collectionId', v),
+})
+const cmsFieldKey = computed<string>({
+  get: () => props.node?.cmsBinding?.fieldKey ?? 'title',
+  set: (v: string) => setCmsField('fieldKey', v),
+})
+const cmsMode = computed<'single' | 'list'>({
+  get: () => props.node?.cmsBinding?.mode ?? 'single',
+  set: (v: 'single' | 'list') => setCmsField('mode', v),
+})
+
+/** 写入 node.cmsBinding[key]，惰性初始化 cmsBinding 对象 */
+function setCmsField(key: string, value: unknown): void {
+  if (!props.node) return
+  if (!props.node.cmsBinding) {
+    props.node.cmsBinding = { collectionId: '' }
+  }
+  ;(props.node.cmsBinding as unknown as Record<string, unknown>)[key] = value
+  emit('update:cms-binding', props.node.id)
+}
+
+/** 解绑 CMS */
+function clearCmsBinding(): void {
+  if (!props.node) return
+  props.node.cmsBinding = undefined
+  emit('update:cms-binding', props.node.id)
 }
 
 function handleDelete(): void {
@@ -335,6 +575,53 @@ function handleVarNameChange(varName: string): void {
           </ElButton>
         </div>
 
+        <!-- array（D15-E0 可视化数组编辑器：按 itemFields 渲染每行 N 字段） -->
+        <div v-else-if="item.type === 'array'" class="property-panel__array">
+          <div
+            v-for="(row, idx) in getArrayItems(key)"
+            :key="idx"
+            class="property-panel__array-row"
+          >
+            <div class="property-panel__array-fields">
+              <template v-if="item.itemFields">
+                <template v-for="(field, fName) in item.itemFields" :key="fName">
+                  <ElInput
+                    v-if="field.type === 'string' || !field.type"
+                    :model-value="String(row[fName] ?? '')"
+                    :placeholder="field.label || String(fName)"
+                    size="small"
+                    @update:model-value="(v: string) => updateArrayItem(key, idx, String(fName), v)"
+                  />
+                  <ElInputNumber
+                    v-else-if="field.type === 'number'"
+                    :model-value="Number(row[fName] ?? 0)"
+                    size="small"
+                    controls-position="right"
+                    @update:model-value="(v?: number) => updateArrayItem(key, idx, String(fName), v ?? 0)"
+                  />
+                  <ElSwitch
+                    v-else-if="field.type === 'boolean'"
+                    :model-value="Boolean(row[fName])"
+                    @update:model-value="(v: string | number | boolean) => updateArrayItem(key, idx, String(fName), v)"
+                  />
+                  <ElSelect
+                    v-else-if="field.type === 'select'"
+                    :model-value="(row[fName] as string | number | boolean)"
+                    :placeholder="field.label || String(fName)"
+                    size="small"
+                    style="flex: 1"
+                    @update:model-value="(v: string | number | boolean) => updateArrayItem(key, idx, String(fName), v)"
+                  >
+                    <ElOption v-for="opt in field.options || []" :key="String(opt.value)" :label="opt.label" :value="opt.value" />
+                  </ElSelect>
+                </template>
+              </template>
+            </div>
+            <ElButton size="small" type="danger" link :disabled="readonly" @click="removeArrayItem(key, idx)">删除</ElButton>
+          </div>
+          <ElButton size="small" type="primary" link :disabled="readonly" @click="addArrayItem(key, item.itemFields)">+ 添加</ElButton>
+        </div>
+
         <!-- json -->
         <ElInput
           v-else-if="item.type === 'json'"
@@ -471,6 +758,61 @@ function handleVarNameChange(varName: string): void {
     margin-top: auto;
     padding-top: 12px;
     border-top: 1px solid #ebeef5;
+  }
+
+  // === V2-T5 动画分区 ===
+  &__animation {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+
+  &__anim-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+  }
+
+  &__anim-label {
+    font-size: 12px;
+    color: #606266;
+    flex-shrink: 0;
+    min-width: 56px;
+  }
+
+  &__anim-hint {
+    font-size: 11px;
+    color: #909399;
+  }
+
+  // === V2-T7 CMS 绑定分区 ===
+  &__cms {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+
+  &__cms-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+  }
+
+  &__cms-label {
+    font-size: 12px;
+    color: #606266;
+    flex-shrink: 0;
+    min-width: 40px;
+  }
+
+  &__cms-hint {
+    font-size: 12px;
+    color: #909399;
+    line-height: 1.5;
   }
 }
 </style>

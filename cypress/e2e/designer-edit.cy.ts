@@ -44,9 +44,12 @@ describe('设计器 § 场景 E: IDE 完整编辑流程', { testIsolation: false
     })
     cy.wait(500)
     cy.get('[data-node-id="node-btn"]').should('contain', '修改后的文案')
-    // Ctrl+Z 撤销（在 document 上触发，确保 window keydown capture 能收到）
-    cy.document().trigger('keydown', {
-      keyCode: 90, key: 'z', ctrlKey: true, bubbles: true,
+    // Ctrl+Z 撤销（直接 dispatch KeyboardEvent 到 window，确保 capture listener 收到）
+    cy.window().then((win) => {
+      win.dispatchEvent(new win.KeyboardEvent('keydown', {
+        key: 'z', code: 'KeyZ', keyCode: 90, which: 90,
+        ctrlKey: true, bubbles: true, cancelable: true,
+      }))
     })
     cy.wait(500)
     cy.get('[data-node-id="node-btn"]').invoke('text').then((text) => {

@@ -10,6 +10,7 @@ export default defineConfig({
     },
   },
   server: {
+    host: '127.0.0.1',
     allowedHosts: ['localhost', '127.0.0.1', 'test.local'],
     proxy: {
       '/api': {

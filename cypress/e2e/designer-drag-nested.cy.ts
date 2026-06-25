@@ -8,17 +8,20 @@
  *
  * SortableJS group='luban-nodes' 实现跨容器拖拽，所有容器共享同一个 group
  */
-import { TEST_SITE_ID, TEST_PAGE_ID, loginAndGetToken, resetPage } from './_helpers'
+import { TEST_SITE_ID, loginAndGetToken, createTestPage, getTestPageId, presetPageSchema, resetPage } from './_helpers'
 
 describe('设计器 § 场景 C: 跨嵌套容器拖拽', { testIsolation: false }, () => {
   before(() => {
     cy.request({
       method: 'POST',
-      url: 'http://127.0.0.1:3100/api/auth/login',
+      url: 'http://127.0.0.1:3000/api/auth/login',
       body: { username: 'admin', password: 'admin123' },
     }).then((res) => {
       const token = res.body.token
       Cypress.env('authToken', token)
+
+      // 确保测试页面存在
+      createTestPage()
 
       // 预设 schema：Row 容器含两个 Col，Col1 有按钮
       const presetSchema = {
@@ -53,16 +56,16 @@ describe('设计器 § 场景 C: 跨嵌套容器拖拽', { testIsolation: false 
       }
       cy.request({
         method: 'PUT',
-        url: `http://127.0.0.1:3100/api/sites/${TEST_SITE_ID}/pages/${TEST_PAGE_ID}`,
-        headers: { Authorization: `Bearer ${token}` },
-        body: { name: 'E2E 测试页面', path: '/e2e-test', schema: presetSchema },
+        url: `http://127.0.0.1:8080/backend/sites/${TEST_SITE_ID}/pages/${getTestPageId()}`,
+        headers: { 'X-User-ID': 'f7316395-f07f-4c3c-bead-5fa0820402ed', 'X-User-Role': 'admin', 'Content-Type': 'application/json' },
+        body: { name: 'E2E 设计器测试', path: Cypress.env('testPagePath'), schema: presetSchema },
       })
     })
   })
 
   beforeEach(() => {
     const token = Cypress.env('authToken') as string
-    cy.loginWithToken(token, `/sites/${TEST_SITE_ID}/pages/${TEST_PAGE_ID}`)
+    cy.loginWithToken(token, `/sites/${TEST_SITE_ID}/pages/${getTestPageId()}`)
     cy.get('.luban-designer', { timeout: 15000 }).should('exist')
     // 等待 Row/Col 渲染
     cy.get('[data-lb-node]', { timeout: 10000 }).should('have.length.at.least', 5)
@@ -110,7 +113,7 @@ describe('设计器 § 场景 C: 跨嵌套容器拖拽', { testIsolation: false 
       const beforeCount = $before.length
 
       // HTML5 drag from panel → drop on col-2
-      cy.get('[data-palette-type="LubanText"]').then(($el) => {
+      cy.get('.lb-component-panel__item:contains("文本")').then(($el) => {
         const dataTransfer = new DataTransfer()
 
         cy.wrap($el).trigger('dragstart', { dataTransfer, force: true })
@@ -132,11 +135,11 @@ describe('设计器 § 场景 C: 跨嵌套容器拖拽', { testIsolation: false 
     const token = Cypress.env('authToken') as string
     cy.request({
       method: 'PUT',
-      url: `http://127.0.0.1:3100/api/sites/${TEST_SITE_ID}/pages/${TEST_PAGE_ID}`,
-      headers: { Authorization: `Bearer ${token}` },
+      url: `http://127.0.0.1:8080/backend/sites/${TEST_SITE_ID}/pages/${getTestPageId()}`,
+      headers: { 'X-User-ID': 'f7316395-f07f-4c3c-bead-5fa0820402ed', 'X-User-Role': 'admin', 'Content-Type': 'application/json' },
       body: {
-        name: 'E2E 测试页面',
-        path: '/e2e-test',
+        name: 'E2E 设计器测试',
+        path: Cypress.env('testPagePath'),
         schema: {
           root: {
             id: 'root',
@@ -186,7 +189,6 @@ describe('设计器 § 场景 C: 跨嵌套容器拖拽', { testIsolation: false 
   })
 
   after(() => {
-    const token = Cypress.env('authToken') as string
-    cy.resetPageSchema(TEST_SITE_ID, TEST_PAGE_ID, token)
+    resetPage()
   })
 })

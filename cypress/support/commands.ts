@@ -34,12 +34,61 @@ declare global {
 
 const MOCK_TOKEN = 'mock-jwt-token'
 
-Cypress.Commands.add('loginWithToken', (token = MOCK_TOKEN, visitPath = '/dashboard') => {
-  cy.window().then((win) => {
-    win.localStorage.setItem('luban_token', token)
+// 真实登录获取 token
+function loginUser(): void {
+  cy.request({
+    method: 'POST',
+    url: 'http://127.0.0.1:3000/api/auth/login',
+    body: { username: 'admin', password: 'admin123' },
+  }).then((res) => {
+    Cypress.env('authToken', res.body.token)
+    cy.window().then((win) => {
+      win.localStorage.setItem('luban_token', res.body.token)
+    })
   })
+}
+
+Cypress.Commands.add('loginWithToken', (token?: string, visitPath = '/dashboard') => {
+  // 用 cy.session 缓存登录状态（自动管理 localStorage 跨 visit 持久化）
+  const useRealLogin = !token || token === MOCK_TOKEN
+
+  if (useRealLogin) {
+    cy.session(
+      'admin-user',
+      () => {
+        // cy.session 内部会在 blank page 上执行，然后保存 localStorage snapshot
+        cy.request({
+          method: 'POST',
+          url: 'http://127.0.0.1:3000/api/auth/login',
+          body: { username: 'admin', password: 'admin123' },
+        }).then((res) => {
+          Cypress.env('authToken', res.body.token)
+          // cy.session 自动保存 window state（含 localStorage）
+          cy.window().then((win) => {
+            win.localStorage.setItem('luban_token', res.body.token)
+          })
+        })
+      },
+      {
+        cacheAcrossSpecs: true,
+      }
+    )
+  } else {
+    // 用传入的 token
+    cy.window().then((win) => {
+      win.localStorage.setItem('luban_token', token)
+    })
+  }
+
+  // visit 目标路径（cy.session 会自动恢复 localStorage）
   if (visitPath) {
-    cy.visit(visitPath)
+    cy.visit(visitPath, {
+      onBeforeLoad(win) {
+        // 双保险：确保 token 在导航前注入
+        const t = token && token !== MOCK_TOKEN ? token : win.localStorage.getItem('luban_token')
+        if (t) win.localStorage.setItem('luban_token', t)
+      },
+    })
   }
 })
 
@@ -117,7 +166,7 @@ Cypress.Commands.add('resetPageSchema', (siteId: string, pageId: string, token: 
   const emptySchema = { root: { id: 'root', type: 'LubanContainer', props: {}, children: [] } }
   cy.request({
     method: 'PUT',
-    url: `http://127.0.0.1:3100/api/sites/${siteId}/pages/${pageId}`,
+    url: `http://127.0.0.1:3000/api/sites/${siteId}/pages/${pageId}`,
     headers: { Authorization: `Bearer ${token}` },
     body: { name: 'E2E 测试页面', path: '/e2e-test', schema: emptySchema },
   })

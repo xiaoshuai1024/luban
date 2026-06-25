@@ -8,17 +8,20 @@
  *
  * SortableJS 监听 mouse 事件（非 HTML5 drag），用 mousedown/mousemove/mouseup 链
  */
-import { TEST_SITE_ID, TEST_PAGE_ID, loginAndGetToken, resetPage } from './_helpers'
+import { TEST_SITE_ID, loginAndGetToken, createTestPage, getTestPageId, presetPageSchema, resetPage } from './_helpers'
 
 describe('设计器 § 场景 B: SortableJS 画布排序', { testIsolation: false }, () => {
   before(() => {
     cy.request({
       method: 'POST',
-      url: 'http://127.0.0.1:3100/api/auth/login',
+      url: 'http://127.0.0.1:3000/api/auth/login',
       body: { username: 'admin', password: 'admin123' },
     }).then((res) => {
       const token = res.body.token
       Cypress.env('authToken', token)
+
+      // 确保测试页面存在
+      createTestPage()
 
       // 预设 schema：3 个组件（Button + Text + Container）
       const presetSchema = {
@@ -35,16 +38,16 @@ describe('设计器 § 场景 B: SortableJS 画布排序', { testIsolation: fals
       }
       cy.request({
         method: 'PUT',
-        url: `http://127.0.0.1:3100/api/sites/${TEST_SITE_ID}/pages/${TEST_PAGE_ID}`,
-        headers: { Authorization: `Bearer ${token}` },
-        body: { name: 'E2E 测试页面', path: '/e2e-test', schema: presetSchema },
+        url: `http://127.0.0.1:8080/backend/sites/${TEST_SITE_ID}/pages/${getTestPageId()}`,
+        headers: { 'X-User-ID': 'f7316395-f07f-4c3c-bead-5fa0820402ed', 'X-User-Role': 'admin', 'Content-Type': 'application/json' },
+        body: { name: 'E2E 设计器测试', path: Cypress.env('testPagePath'), schema: presetSchema },
       })
     })
   })
 
   beforeEach(() => {
     const token = Cypress.env('authToken') as string
-    cy.loginWithToken(token, `/sites/${TEST_SITE_ID}/pages/${TEST_PAGE_ID}`)
+    cy.loginWithToken(token, `/sites/${TEST_SITE_ID}/pages/${getTestPageId()}`)
     cy.get('.luban-designer', { timeout: 15000 }).should('exist')
     // 等待组件渲染
     cy.get('[data-lb-node]', { timeout: 10000 }).should('have.length.at.least', 3)
@@ -127,11 +130,11 @@ describe('设计器 § 场景 B: SortableJS 画布排序', { testIsolation: fals
     const token = Cypress.env('authToken') as string
     cy.request({
       method: 'PUT',
-      url: `http://127.0.0.1:3100/api/sites/${TEST_SITE_ID}/pages/${TEST_PAGE_ID}`,
-      headers: { Authorization: `Bearer ${token}` },
+      url: `http://127.0.0.1:8080/backend/sites/${TEST_SITE_ID}/pages/${getTestPageId()}`,
+      headers: { 'X-User-ID': 'f7316395-f07f-4c3c-bead-5fa0820402ed', 'X-User-Role': 'admin', 'Content-Type': 'application/json' },
       body: {
-        name: 'E2E 测试页面',
-        path: '/e2e-test',
+        name: 'E2E 设计器测试',
+        path: Cypress.env('testPagePath'),
         schema: {
           root: {
             id: 'root',
@@ -180,7 +183,6 @@ describe('设计器 § 场景 B: SortableJS 画布排序', { testIsolation: fals
   })
 
   after(() => {
-    const token = Cypress.env('authToken') as string
-    cy.resetPageSchema(TEST_SITE_ID, TEST_PAGE_ID, token)
+    resetPage()
   })
 })

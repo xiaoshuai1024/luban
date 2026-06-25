@@ -12,37 +12,37 @@
  * 真实事件链：trigger('dragstart', { dataTransfer }) → trigger('dragover') → trigger('drop')
  */
 import '@4tw/cypress-drag-drop'
-import { TEST_SITE_ID, TEST_PAGE_ID, loginAndGetToken, resetPage } from './_helpers'
+import { TEST_SITE_ID, loginAndGetToken, createTestPage, getTestPageId, presetPageSchema, resetPage } from './_helpers'
 
 describe('设计器 § 场景 A: 组件库拖入画布', { testIsolation: false }, () => {
   before(() => {
     // 获取真实 token（通过 BFF login API）
     cy.request({
       method: 'POST',
-      url: 'http://127.0.0.1:3100/api/auth/login',
+      url: 'http://127.0.0.1:3000/api/auth/login',
       body: { username: 'admin', password: 'admin123' },
     }).then((res) => {
       const token = res.body.token
       Cypress.env('authToken', token)
 
-      // 重置页面 schema
-      cy.resetPageSchema(TEST_SITE_ID, TEST_PAGE_ID, token)
+      // 创建测试页面 + 重置 schema
+      createTestPage().then(() => resetPage())
     })
   })
 
   beforeEach(() => {
     const token = Cypress.env('authToken') as string
-    cy.loginWithToken(token, `/sites/${TEST_SITE_ID}/pages/${TEST_PAGE_ID}`)
+    cy.loginWithToken(token, `/sites/${TEST_SITE_ID}/pages/${getTestPageId()}`)
     // 等待 PageEditor + LubanDesigner 加载
     cy.get('.luban-designer', { timeout: 15000 }).should('exist')
   })
 
   it('A1: dragstart 事件正确设置 dataTransfer', () => {
     // 组件面板应有 LubanButton 项
-    cy.get('[data-palette-type="LubanButton"]', { timeout: 10000 }).should('exist')
+    cy.get('.lb-component-panel__item:contains("按钮")', { timeout: 10000 }).should('exist')
 
     // 触发 dragstart 并检查 dataTransfer
-    cy.get('[data-palette-type="LubanButton"]').then(($el) => {
+    cy.get('.lb-component-panel__item:contains("按钮")').then(($el) => {
       const dataTransfer = new DataTransfer()
 
       cy.wrap($el)
@@ -63,7 +63,7 @@ describe('设计器 § 场景 A: 组件库拖入画布', { testIsolation: false 
       const beforeCount = $before.length
 
       // 执行拖拽
-      cy.dragFromPanelToCanvas('[data-palette-type="LubanButton"]', '.luban-designer__canvas')
+      cy.dragFromPanelToCanvas('.lb-component-panel__item:contains("按钮")', '.luban-designer__canvas')
 
       // 等待 DOM 更新
       cy.wait(300)
@@ -80,7 +80,7 @@ describe('设计器 § 场景 A: 组件库拖入画布', { testIsolation: false 
   })
 
   it('A3: 拖入时画布显示 drop-active 高亮', () => {
-    cy.get('[data-palette-type="LubanButton"]').then(($el) => {
+    cy.get('.lb-component-panel__item:contains("按钮")').then(($el) => {
       const dataTransfer = new DataTransfer()
 
       // dragenter → 触发 drop-active class
@@ -98,11 +98,11 @@ describe('设计器 § 场景 A: 组件库拖入画布', { testIsolation: false 
 
   it('A4: 拖入组件间隙显示插入指示线', () => {
     // 先拖入一个组件确保有间隙
-    cy.dragFromPanelToCanvas('[data-palette-type="LubanText"]', '.luban-designer__canvas')
+    cy.dragFromPanelToCanvas('.lb-component-panel__item:contains("文本")', '.luban-designer__canvas')
     cy.wait(200)
 
     // 再拖入第二个，应在间隙显示指示线
-    cy.get('[data-palette-type="LubanButton"]').then(($el) => {
+    cy.get('.lb-component-panel__item:contains("按钮")').then(($el) => {
       const dataTransfer = new DataTransfer()
 
       cy.wrap($el).trigger('dragstart', { dataTransfer, force: true })
@@ -123,7 +123,7 @@ describe('设计器 § 场景 A: 组件库拖入画布', { testIsolation: false 
   })
 
   it('A5: 拖入时显示 drop-preview ghost（组件类型名）', () => {
-    cy.get('[data-palette-type="LubanText"]').then(($el) => {
+    cy.get('.lb-component-panel__item:contains("文本")').then(($el) => {
       const dataTransfer = new DataTransfer()
 
       cy.wrap($el).trigger('dragstart', { dataTransfer, force: true })
@@ -160,7 +160,6 @@ describe('设计器 § 场景 A: 组件库拖入画布', { testIsolation: false 
 
   after(() => {
     // 清理：重置页面
-    const token = Cypress.env('authToken') as string
-    cy.resetPageSchema(TEST_SITE_ID, TEST_PAGE_ID, token)
+    resetPage()
   })
 })

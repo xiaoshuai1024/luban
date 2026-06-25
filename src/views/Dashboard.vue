@@ -1,28 +1,28 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { ElRow, ElCol, ElCard, ElStatistic } from 'element-plus'
-import { getSites } from '@/api/site'
-import { getUsers } from '@/api/user'
+import { ref, onMounted } from 'vue';
+import { ElRow, ElCol, ElCard, ElStatistic } from 'element-plus';
+import { getSites } from '@/api/site';
+import { getUsers } from '@/api/user';
 
-const siteCount = ref(0)
-const userCount = ref(0)
+const siteCount = ref(0);
+const userCount = ref(0);
 
 onMounted(async () => {
-    console.log('[Dashboard] onMounted')
+  console.log('[Dashboard] onMounted');
 
   try {
     const [sitesRes, usersRes] = await Promise.all([
       getSites().catch(() => ({ data: [] })),
       getUsers().catch(() => ({ data: { list: [], total: 0 } })),
-    ])
-    siteCount.value = Array.isArray(sitesRes.data) ? sitesRes.data.length : 0
-    userCount.value = usersRes.data?.total ?? 0
+    ]);
+    siteCount.value = Array.isArray(sitesRes.data) ? sitesRes.data.length : 0;
+    userCount.value = usersRes.data?.total ?? 0;
   } catch {
     // mock for demo
-    siteCount.value = 0
-    userCount.value = 0
+    siteCount.value = 0;
+    userCount.value = 0;
   }
-})
+});
 </script>
 
 <template>
@@ -74,6 +74,7 @@ onMounted(async () => {
   color: #409eff;
   text-decoration: none;
   font-size: 14px;
+
   &:hover {
     text-decoration: underline;
   }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import {
   ElButton,
   ElTable,
@@ -11,82 +11,82 @@ import {
   ElInput,
   ElMessage,
   ElMessageBox,
-} from 'element-plus'
-import { getSites, createSite, updateSite, deleteSite, type Site } from '@/api/site'
+} from 'element-plus';
+import { getSites, createSite, updateSite, deleteSite, type Site } from '@/api/site';
 
-const router = useRouter()
-const list = ref<Site[]>([])
-const loading = ref(false)
-const dialogVisible = ref(false)
-const editingId = ref<string | null>(null)
-const form = ref<Partial<Site>>({ name: '', slug: '', baseUrl: '', status: 'active' })
+const router = useRouter();
+const list = ref<Site[]>([]);
+const loading = ref(false);
+const dialogVisible = ref(false);
+const editingId = ref<string | null>(null);
+const form = ref<Partial<Site>>({ name: '', slug: '', baseUrl: '', status: 'active' });
 
 async function fetchList() {
-  loading.value = true
+  loading.value = true;
   try {
-    const { data } = await getSites()
-    list.value = Array.isArray(data) ? data : []
+    const { data } = await getSites();
+    list.value = Array.isArray(data) ? data : [];
   } catch {
-    list.value = []
+    list.value = [];
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 function openCreate() {
-  editingId.value = null
-  form.value = { name: '', slug: '', baseUrl: '', status: 'active' }
-  dialogVisible.value = true
+  editingId.value = null;
+  form.value = { name: '', slug: '', baseUrl: '', status: 'active' };
+  dialogVisible.value = true;
 }
 
 function openEdit(row: Site) {
-  editingId.value = row.id
-  form.value = { ...row }
-  dialogVisible.value = true
+  editingId.value = row.id;
+  form.value = { ...row };
+  dialogVisible.value = true;
 }
 
 async function submitForm() {
   if (!form.value.name) {
-    ElMessage.warning('请输入站点名称')
-    return
+    ElMessage.warning('请输入站点名称');
+    return;
   }
   try {
     if (editingId.value) {
-      await updateSite(editingId.value, form.value as Partial<Site>)
-      ElMessage.success('更新成功')
+      await updateSite(editingId.value, form.value as Partial<Site>);
+      ElMessage.success('更新成功');
     } else {
-      await createSite(form.value as Omit<Site, 'id' | 'createdAt' | 'updatedAt'>)
-      ElMessage.success('创建成功')
+      await createSite(form.value as Omit<Site, 'id' | 'createdAt' | 'updatedAt'>);
+      ElMessage.success('创建成功');
     }
-    dialogVisible.value = false
-    fetchList()
+    dialogVisible.value = false;
+    fetchList();
   } catch (e) {
-    ElMessage.error((e as Error).message || '操作失败')
+    ElMessage.error((e as Error).message || '操作失败');
   }
 }
 
 function goDetail(row: Site) {
-  router.push(`/sites/${row.id}`)
+  router.push(`/sites/${row.id}`);
 }
 
 function goPages(row: Site) {
-  router.push(`/sites/${row.id}/pages`)
+  router.push(`/sites/${row.id}/pages`);
 }
 
 async function handleDelete(row: Site) {
   await ElMessageBox.confirm(`确定删除站点「${row.name}」？`, '提示', {
     type: 'warning',
-  })
+  });
   try {
-    await deleteSite(row.id)
-    ElMessage.success('删除成功')
-    fetchList()
+    await deleteSite(row.id);
+    ElMessage.success('删除成功');
+    fetchList();
   } catch (e) {
-    ElMessage.error((e as Error).message || '删除失败')
+    ElMessage.error((e as Error).message || '删除失败');
   }
 }
 
-onMounted(fetchList)
+onMounted(fetchList);
 </script>
 
 <template>
@@ -94,7 +94,7 @@ onMounted(fetchList)
     <div class="site-list__toolbar">
       <ElButton type="primary" @click="openCreate">新建站点</ElButton>
     </div>
-    <ElTable :data="list" v-loading="loading" stripe>
+    <ElTable v-loading="loading" :data="list" stripe>
       <ElTableColumn prop="name" label="名称" min-width="120" />
       <ElTableColumn prop="slug" label="标识" width="120" />
       <ElTableColumn prop="baseUrl" label="基础 URL" min-width="160" />

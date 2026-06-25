@@ -1,37 +1,37 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElCard, ElDescriptions, ElDescriptionItem, ElButton } from 'element-plus'
-import { getSite, type Site } from '@/api/site'
+import { ref, computed, onMounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { ElCard, ElDescriptions, ElDescriptionItem, ElButton } from 'element-plus';
+import { getSite, type Site } from '@/api/site';
 
-const route = useRoute()
-const router = useRouter()
-const id = computed(() => route.params.id as string)
-const site = ref<Site | null>(null)
-const loading = ref(false)
+const route = useRoute();
+const router = useRouter();
+const id = computed(() => route.params.id as string);
+const site = ref<Site | null>(null);
+const loading = ref(false);
 
 async function fetch() {
-  if (!id.value) return
-  loading.value = true
+  if (!id.value) return;
+  loading.value = true;
   try {
-    const { data } = await getSite(id.value)
-    site.value = data
+    const { data } = await getSite(id.value);
+    site.value = data;
   } catch {
-    site.value = null
+    site.value = null;
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 function goPages() {
-  router.push(`/sites/${id.value}/pages`)
+  router.push(`/sites/${id.value}/pages`);
 }
 
-onMounted(fetch)
+onMounted(fetch);
 </script>
 
 <template>
-  <div class="site-detail" v-loading="loading">
+  <div v-loading="loading" class="site-detail">
     <ElCard v-if="site" header="站点信息">
       <ElDescriptions :column="1" border>
         <ElDescriptionItem label="名称">{{ site.name }}</ElDescriptionItem>

@@ -1,60 +1,53 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import {
-  ElButton,
-  ElTable,
-  ElTableColumn,
-  ElMessage,
-  ElMessageBox,
-  ElTag,
-} from 'element-plus'
-import { getPages, deletePage, type PageMeta } from '@/api/page'
-import { getSite, type Site } from '@/api/site'
-import { buildPublishedPagePreviewUrl } from '@/utils/publicPage'
+import { ref, computed, onMounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { ElButton, ElTable, ElTableColumn, ElMessage, ElMessageBox, ElTag } from 'element-plus';
+import { getPages, deletePage, type PageMeta } from '@/api/page';
+import { getSite } from '@/api/site';
+import { buildPublishedPagePreviewUrl } from '@/utils/publicPage';
 
-const route = useRoute()
-const router = useRouter()
-const siteId = computed(() => route.params.siteId as string)
-const siteName = ref('')
-const siteSlug = ref('')
-const siteBaseUrl = ref('')
-const list = ref<PageMeta[]>([])
-const loading = ref(false)
+const route = useRoute();
+const router = useRouter();
+const siteId = computed(() => route.params.siteId as string);
+const siteName = ref('');
+const siteSlug = ref('');
+const siteBaseUrl = ref('');
+const list = ref<PageMeta[]>([]);
+const loading = ref(false);
 
 async function fetchSite() {
-  if (!siteId.value) return
+  if (!siteId.value) return;
   try {
-    const { data } = await getSite(siteId.value)
-    siteName.value = data.name
-    siteSlug.value = data.slug ?? ''
-    siteBaseUrl.value = data.baseUrl ?? ''
+    const { data } = await getSite(siteId.value);
+    siteName.value = data.name;
+    siteSlug.value = data.slug ?? '';
+    siteBaseUrl.value = data.baseUrl ?? '';
   } catch {
-    siteName.value = ''
-    siteSlug.value = ''
-    siteBaseUrl.value = ''
+    siteName.value = '';
+    siteSlug.value = '';
+    siteBaseUrl.value = '';
   }
 }
 
 async function fetchList() {
-  if (!siteId.value) return
-  loading.value = true
+  if (!siteId.value) return;
+  loading.value = true;
   try {
-    const { data } = await getPages(siteId.value)
-    list.value = Array.isArray(data) ? data : []
+    const { data } = await getPages(siteId.value);
+    list.value = Array.isArray(data) ? data : [];
   } catch {
-    list.value = []
+    list.value = [];
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 function goNew() {
-  router.push(`/sites/${siteId.value}/pages/new`)
+  router.push(`/sites/${siteId.value}/pages/new`);
 }
 
 function goEdit(row: PageMeta) {
-  router.push(`/sites/${siteId.value}/pages/${row.id}`)
+  router.push(`/sites/${siteId.value}/pages/${row.id}`);
 }
 
 function openPublishedPreview(row: PageMeta) {
@@ -62,31 +55,31 @@ function openPublishedPreview(row: PageMeta) {
     slug: siteSlug.value,
     baseUrl: siteBaseUrl.value,
     path: row.path,
-  })
+  });
 
   if (!url) {
-    ElMessage.warning('当前站点未配置 slug 或 baseUrl，无法预览')
-    return
+    ElMessage.warning('当前站点未配置 slug 或 baseUrl，无法预览');
+    return;
   }
 
-  window.open(url, '_blank', 'noopener,noreferrer')
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 async function handleDelete(row: PageMeta) {
-  await ElMessageBox.confirm(`确定删除页面「${row.name}」？`, '提示', { type: 'warning' })
+  await ElMessageBox.confirm(`确定删除页面「${row.name}」？`, '提示', { type: 'warning' });
   try {
-    await deletePage(siteId.value, row.id)
-    ElMessage.success('删除成功')
-    fetchList()
+    await deletePage(siteId.value, row.id);
+    ElMessage.success('删除成功');
+    fetchList();
   } catch (e) {
-    ElMessage.error((e as Error).message || '删除失败')
+    ElMessage.error((e as Error).message || '删除失败');
   }
 }
 
 onMounted(() => {
-  fetchSite()
-  fetchList()
-})
+  fetchSite();
+  fetchList();
+});
 </script>
 
 <template>
@@ -95,7 +88,7 @@ onMounted(() => {
       <span v-if="siteName" class="page-list__site">站点：{{ siteName }}</span>
       <ElButton type="primary" @click="goNew">新建页面</ElButton>
     </div>
-    <ElTable :data="list" v-loading="loading" stripe>
+    <ElTable v-loading="loading" :data="list" stripe>
       <ElTableColumn prop="name" label="页面名称" min-width="160" />
       <ElTableColumn prop="path" label="路径" min-width="120" />
       <ElTableColumn prop="status" label="状态" width="100">

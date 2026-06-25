@@ -1,100 +1,100 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, shallowRef } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElButton, ElInput, ElFormItem, ElForm, ElMessage, ElCard } from 'element-plus'
-import { getPage, savePage, createPage } from '@/api/page'
-import type { PageSchema } from '@/types/schema'
+import { ref, computed, onMounted, watch, shallowRef } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { ElButton, ElInput, ElFormItem, ElForm, ElMessage, ElCard } from 'element-plus';
+import { getPage, savePage, createPage } from '@/api/page';
+import type { PageSchema } from '@/types/schema';
 
-const route = useRoute()
-const router = useRouter()
-const siteId = computed(() => route.params.siteId as string)
-const pageId = computed(() => route.params.pageId as string)
-const isNew = computed(() => route.name === 'PageNew' || route.meta.isNew)
+const route = useRoute();
+const router = useRouter();
+const siteId = computed(() => route.params.siteId as string);
+const pageId = computed(() => route.params.pageId as string);
+const isNew = computed(() => route.name === 'PageNew' || route.meta.isNew);
 
-const pageName = ref('')
-const pagePath = ref('')
-const schema = ref<PageSchema | null>(null)
-const loading = ref(false)
-const saving = ref(false)
-const designerError = ref<string | null>(null)
-const DesignerComponent = shallowRef<unknown>(null)
+const pageName = ref('');
+const pagePath = ref('');
+const schema = ref<PageSchema | null>(null);
+const loading = ref(false);
+const saving = ref(false);
+const designerError = ref<string | null>(null);
+const DesignerComponent = shallowRef<unknown>(null);
 
 onMounted(() => {
   import(/* @vite-ignore */ 'luban-low-code')
     .then((m: { LubanDesigner: unknown }) => {
-      DesignerComponent.value = m.LubanDesigner
+      DesignerComponent.value = m.LubanDesigner;
     })
     .catch(() => {
-      designerError.value = '未安装 luban-low-code，无法使用页面设计器。请通过 npm 安装并配置。'
-    })
-})
+      designerError.value = '未安装 luban-low-code，无法使用页面设计器。请通过 npm 安装并配置。';
+    });
+});
 
 async function loadPage() {
-  if (!siteId.value || (isNew.value ? false : !pageId.value)) return
-  loading.value = true
+  if (!siteId.value || (isNew.value ? false : !pageId.value)) return;
+  loading.value = true;
   try {
     if (isNew.value) {
-      pageName.value = ''
-      pagePath.value = ''
+      pageName.value = '';
+      pagePath.value = '';
       schema.value = {
         root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
-      }
+      };
     } else {
-      const { data } = await getPage(siteId.value, pageId.value)
-      pageName.value = data.name
-      pagePath.value = data.path
+      const { data } = await getPage(siteId.value, pageId.value);
+      pageName.value = data.name;
+      pagePath.value = data.path;
       schema.value = data.schema ?? {
         root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
-      }
+      };
     }
   } catch {
-    schema.value = { root: { id: 'root', type: 'LubanContainer', props: {}, children: [] } }
+    schema.value = { root: { id: 'root', type: 'LubanContainer', props: {}, children: [] } };
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 async function handleSave() {
-  if (!schema.value || !siteId.value) return
+  if (!schema.value || !siteId.value) return;
   if (!pageName.value || !pagePath.value) {
-    ElMessage.warning('请填写页面名称和路径')
-    return
+    ElMessage.warning('请填写页面名称和路径');
+    return;
   }
-  saving.value = true
+  saving.value = true;
   try {
     if (isNew.value) {
       const { data } = await createPage(siteId.value, {
         name: pageName.value,
         path: pagePath.value,
         schema: schema.value,
-      })
-      ElMessage.success('创建成功')
-      router.replace(`/sites/${siteId.value}/pages/${data.id}`)
+      });
+      ElMessage.success('创建成功');
+      router.replace(`/sites/${siteId.value}/pages/${data.id}`);
     } else {
       await savePage(siteId.value, pageId.value, {
         name: pageName.value,
         path: pagePath.value,
         schema: schema.value,
-      })
-      ElMessage.success('保存成功')
+      });
+      ElMessage.success('保存成功');
     }
   } catch (e) {
-    ElMessage.error((e as Error).message || '保存失败')
+    ElMessage.error((e as Error).message || '保存失败');
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 
 function goBack() {
-  router.push(`/sites/${siteId.value}/pages`)
+  router.push(`/sites/${siteId.value}/pages`);
 }
 
-onMounted(loadPage)
-watch([siteId, pageId], loadPage)
+onMounted(loadPage);
+watch([siteId, pageId], loadPage);
 </script>
 
 <template>
-  <div class="page-editor" v-loading="loading">
+  <div v-loading="loading" class="page-editor">
     <ElCard class="page-editor__meta" shadow="never">
       <ElForm inline>
         <ElFormItem label="页面名称">

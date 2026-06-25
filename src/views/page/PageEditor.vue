@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, shallowRef } from 'vue'
+import { ref, computed, onMounted, watch, shallowRef, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElButton, ElInput, ElMessage } from 'element-plus'
 import { getPage, savePage, createPage } from '@/api/page'
@@ -216,8 +216,8 @@ async function loadPage() {
 function onSchemaUpdate(newSchema: PageSchema | null) {
   if (!newSchema) return
   schema.value = newSchema
-  // 推入历史栈（深拷贝快照）
-  if (history.value) {
+  // 推入历史栈（undo/redo 时跳过，避免循环）
+  if (history.value && !isUndoRedoing.value) {
     history.value.push(JSON.parse(JSON.stringify(newSchema)))
   }
 }
@@ -265,11 +265,15 @@ function onStyleUpdate(patch: Record<string, unknown>) {
 }
 
 // ===== 撤销/重做 =====
+const isUndoRedoing = ref(false)
+
 function doUndo() {
   if (!history.value) return
   history.value.undo()
   if (history.value.current.value) {
+    isUndoRedoing.value = true
     schema.value = JSON.parse(JSON.stringify(history.value.current.value))
+    nextTick(() => { isUndoRedoing.value = false })
   }
 }
 
@@ -277,7 +281,9 @@ function doRedo() {
   if (!history.value) return
   history.value.redo()
   if (history.value.current.value) {
+    isUndoRedoing.value = true
     schema.value = JSON.parse(JSON.stringify(history.value.current.value))
+    nextTick(() => { isUndoRedoing.value = false })
   }
 }
 

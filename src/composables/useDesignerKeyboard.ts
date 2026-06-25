@@ -44,7 +44,9 @@ export function useDesignerKeyboard(options: UseDesignerKeyboardOptions) {
   }
 
   function isMod(e: KeyboardEvent): boolean {
-    return isMac ? e.metaKey : e.ctrlKey
+    // 跨平台：Mac 用 metaKey（Cmd），Windows/Linux 用 ctrlKey
+    // 测试模拟可能用任意一个，所以两者都检查
+    return e.metaKey || e.ctrlKey
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -113,10 +115,10 @@ export function useDesignerKeyboard(options: UseDesignerKeyboardOptions) {
   }
 
   onMounted(() => {
-    window.addEventListener('keydown', handleKeydown, { capture: true })
+    document.addEventListener('keydown', handleKeydown)
   })
 
   onUnmounted(() => {
-    window.removeEventListener('keydown', handleKeydown, { capture: true } as EventListenerOptions)
+    document.removeEventListener('keydown', handleKeydown)
   })
 }

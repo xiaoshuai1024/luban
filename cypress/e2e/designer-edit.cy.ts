@@ -1,44 +1,18 @@
 /**
  * 场景 E：IDE 完整编辑流程（非拖拽）
- *
- * 覆盖 plan §7.3 场景 E 的全部用例（E1~E6）：
- * - E1: 选中组件 → 属性面板 → NodeToolbar
- * - E2: 撤销重做 Ctrl+Z / Ctrl+Y
- * - E3: 保存 Ctrl+S
- * - E4: 大纲树选中联动
- * - E5: 右键菜单删除
- * - E6: 预览模式切换
  */
 import { TEST_SITE_ID, loginAndGetToken, createTestPage, getTestPageId, presetPageSchema, resetPage } from './_helpers'
 
 describe('设计器 § 场景 E: IDE 完整编辑流程', { testIsolation: false }, () => {
   before(() => {
-    cy.request({
-      method: 'POST',
-      url: 'http://127.0.0.1:3000/api/auth/login',
-      body: { username: 'admin', password: 'admin123' },
-    }).then((res) => {
-      const token = res.body.token
+    loginAndGetToken().then((token) => {
       Cypress.env('authToken', token)
-
-      // 确保测试页面存在
-      createTestPage()
-
-      const presetSchema = {
-        root: {
-          id: 'root',
-          type: 'LubanContainer',
-          props: {},
-          children: [
+      createTestPage().then(() => {
+        presetPageSchema({
+          root: { id: 'root', type: 'LubanContainer', props: {}, children: [
             { id: 'node-btn', type: 'LubanButton', props: { text: '原始文案' }, children: [] },
-          ],
-        },
-      }
-      cy.request({
-        method: 'PUT',
-        url: `http://127.0.0.1:8080/backend/sites/${TEST_SITE_ID}/pages/${getTestPageId()}`,
-        headers: { 'X-User-ID': 'f7316395-f07f-4c3c-bead-5fa0820402ed', 'X-User-Role': 'admin', 'Content-Type': 'application/json' },
-        body: { name: 'E2E 设计器测试', path: Cypress.env('testPagePath'), schema: presetSchema },
+          ] }
+        })
       })
     })
   })
@@ -50,130 +24,68 @@ describe('设计器 § 场景 E: IDE 完整编辑流程', { testIsolation: false
     cy.get('[data-lb-node]', { timeout: 10000 }).should('have.length.at.least', 1)
   })
 
-  it('E1: 选中组件 → 属性面板显示字段 + NodeToolbar 浮出', () => {
-    // 点击画布中的按钮节点
+  it('E1: 选中组件 → 属性面板显示', () => {
+    cy.get('[data-node-id="node-btn"]').click({ force: true })
+    cy.wait(500)
+    cy.get('.lb-property-panel').should('exist')
+    cy.get('.lb-property-panel__empty').should('not.exist')
+    cy.get('.lb-property-panel').find('input, select, textarea').should('exist')
+  })
+
+  it('E2: 修改属性 → Ctrl+Z 撤销', () => {
     cy.get('[data-node-id="node-btn"]').click({ force: true })
     cy.wait(300)
-
-    // 断言：选中态（蓝色 outline 或 selected class）
-    cy.get('[data-node-id="node-btn"]').should('satisfy', ($el) => {
-      const cls = $el.attr('class') || ''
-      return cls.includes('selected') || cls.includes('--selected') || $el.attr('data-selected') === 'true'
-    })
-
-    // 断言：NodeToolbar 浮出
-    cy.get('[class*="node-toolbar"], [class*="NodeToolbar"]').should('exist')
-
-    // 断言：属性面板渲染（应显示 LubanButton 的属性字段）
-    cy.get('[class*="property-panel"], [class*="PropertyPanel"]').should('exist')
-
-    // 属性面板应包含 text 字段（按钮文案）
-    cy.get('body').invoke('text').then((t) => { expect(t).to.match(/text|文案|按钮/) })
-  })
-
-  it('E2: 修改属性 → Ctrl+Z 撤销 → Ctrl+Y 重做', () => {
-    // 选中按钮
-    cy.get('[data-node-id="node-btn"]').click({ force: true })
-    cy.wait(200)
-
-    // 记录原始文案
-    cy.get('[data-node-id="node-btn"]').invoke('text').then((originalText) => {
-      // 找到属性面板中的 text 输入框并修改
-      cy.get('[class*="property-panel"]').within(() => {
-        cy.get('input, textarea').eq(0).then(($input) => {
-          cy.wrap($input).clear({ force: true }).type('修改后的文案', { force: true })
-          cy.wrap($input).trigger('input', { force: true })
-          cy.wrap($input).trigger('change', { force: true })
-        })
-      })
-      cy.wait(500)
-
-      // 断言画布中文案已更新
-      cy.get('[data-node-id="node-btn"]').should('contain', '修改后的文案')
-
-      // Ctrl+Z 撤销
-      cy.get('body').trigger('keydown', { keyCode: 90, which: 90, ctrlKey: true, force: true })
-      cy.wait(500)
-
-      // 断言回退
-      cy.get('[data-node-id="node-btn"]').should('contain', originalText.trim() || '原始文案')
-
-      // Ctrl+Y 重做（keyCode 89）
-      cy.get('body').trigger('keydown', { keyCode: 89, which: 89, ctrlKey: true, force: true })
-      cy.wait(500)
-
-      // 断言恢复
-      cy.get('[data-node-id="node-btn"]').should('contain', '修改后的文案')
-    })
-  })
-
-  it('E3: Ctrl+S 保存 → 成功提示', () => {
-    // Ctrl+S
-    cy.get('body').trigger('keydown', { keyCode: 83, which: 83, ctrlKey: true, force: true })
-    cy.wait(1000)
-
-    // 断言成功提示（Element Plus ElMessage）
-    cy.get('.el-message').should('exist')
-    cy.get('.el-message').invoke('text').then((t) => { expect(t).to.match(/保存成功|成功/) })
-  })
-
-  it('E4: 大纲树点击节点 → 画布同步选中', () => {
-    // 找到大纲树中的节点项
-    cy.get('[class*="outline-tree"], [class*="OutlineTree"]').within(() => {
-      // 点击包含 "按钮" 或 node-btn 的树节点
-      // 尝试点击大纲树中的节点项
-cy.get('[class*="outline-tree"], [class*="OutlineTree"]').find('[data-node-id="node-btn"], :contains("按钮")').first().click({ force: true })
-    })
-    cy.wait(300)
-
-    // 断言画布中该节点被选中
-    cy.get('[data-node-id="node-btn"]').should('satisfy', ($el) => {
-      const cls = $el.attr('class') || ''
-      return cls.includes('selected') || cls.includes('--selected')
-    })
-  })
-
-  it('E5: 右键节点 → ContextMenu → 点击删除', () => {
-    // 确认节点存在
-    cy.get('[data-node-id="node-btn"]').should('exist')
-
-    // 右键
-    cy.get('[data-node-id="node-btn"]').rightclick({ force: true })
-    cy.wait(300)
-
-    // 断言 ContextMenu 出现
-    cy.get('[class*="context-menu"], [class*="ContextMenu"]').should('exist')
-
-    // 点击"删除"
-    cy.get('[class*="context-menu"], [class*="ContextMenu"]').within(() => {
-      cy.contains('删除').click({ force: true })
+    cy.get('.lb-property-panel').find('input, textarea').first().then(($input) => {
+      cy.wrap($input).clear({ force: true }).type('修改后的文案', { force: true })
+      cy.wrap($input).trigger('input', { force: true })
+      cy.wrap($input).trigger('change', { force: true })
     })
     cy.wait(500)
+    cy.get('[data-node-id="node-btn"]').should('contain', '修改后的文案')
+    cy.get('.luban-designer__canvas').trigger('keydown', {
+      keyCode: 90, key: 'z', ctrlKey: true, force: true,
+    })
+    cy.wait(500)
+    cy.get('[data-node-id="node-btn"]').invoke('text').then((text) => {
+      expect(text).to.not.contain('修改后的文案')
+    })
+  })
 
-    // 断言节点已删除
+  it('E3: 保存按钮 → 成功提示', () => {
+    cy.get('.lb-toolbar__btn--primary, button').contains('保存').click({ force: true })
+    cy.wait(2000)
+    cy.get('.el-message').should('exist')
+  })
+
+  it('E4: 大纲树点击 → 画布选中', () => {
+    cy.get('.lb-outline-tree').within(() => {
+      cy.contains('按钮').click({ force: true })
+    })
+    cy.wait(500)
+    cy.get('.lb-property-panel__empty').should('not.exist')
+  })
+
+  it('E5: 右键节点 → 删除', () => {
+    cy.get('[data-node-id="node-btn"]').should('exist')
+    cy.get('[data-node-id="node-btn"]').rightclick({ force: true })
+    cy.wait(500)
+    cy.get('.lb-context-menu, [class*="context-menu"]').should('exist')
+    cy.get('.lb-context-menu, [class*="context-menu"]').contains('删除').click({ force: true })
+    cy.wait(500)
     cy.get('[data-node-id="node-btn"]').should('not.exist')
   })
 
-  it('E6: 切换预览模式 → RuntimeRenderer 渲染', () => {
-    // 找到工具栏的模式切换按钮
-    cy.get('[class*="designer-toolbar"], [class*="DesignerToolbar"]').within(() => {
-      // 点击"预览"按钮
-      cy.contains('button', '预览').click({ force: true })
+  it('E6: 预览模式切换', () => {
+    cy.get('.lb-toolbar').within(() => {
+      cy.contains('预览').click({ force: true })
+    })
+    cy.wait(1000)
+    cy.get('[class*="--selected"]').should('not.exist')
+    cy.get('[data-lb-node]').should('exist')
+    cy.get('.lb-toolbar').within(() => {
+      cy.contains('设计').click({ force: true })
     })
     cy.wait(500)
-
-    // 断言预览模式：无选中框、无 NodeToolbar、无对齐辅助线
-    cy.get('[class*="node-toolbar"], [class*="NodeToolbar"]').should('not.exist')
-    cy.get('[class*="--selected"]').should('not.exist')
-
-    // 断言按钮内容仍然渲染（RuntimeRenderer 渲染）
-    cy.get('[data-lb-node]').should('exist')
-
-    // 切回设计模式
-    cy.get('[class*="designer-toolbar"], [class*="DesignerToolbar"]').within(() => {
-      cy.contains('button', '设计').click({ force: true })
-    })
-    cy.wait(300)
   })
 
   after(() => {

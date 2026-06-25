@@ -33,6 +33,14 @@ request.interceptors.request.use((config) => {
   const token = getToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
+    // 从 JWT payload 解析 user-id/role，传给 BFF（BFF 转发给 Java 后端）
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]))
+      if (payload.sub) config.headers['X-User-ID'] = payload.sub
+      if (payload.role) config.headers['X-User-Role'] = payload.role
+    } catch {
+      // token 不是 JWT 格式，忽略
+    }
   }
   return config
 })

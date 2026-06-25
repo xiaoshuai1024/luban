@@ -20,9 +20,8 @@ describe('设计器 § 场景 C: 跨嵌套容器拖拽', { testIsolation: false 
       const token = res.body.token
       Cypress.env('authToken', token)
 
-      // 确保测试页面存在
-      createTestPage()
-
+      // 创建测试页面，完成后预设 schema
+      createTestPage().then(() => {
       // 预设 schema：Row 容器含两个 Col，Col1 有按钮
       const presetSchema = {
         root: {
@@ -59,6 +58,7 @@ describe('设计器 § 场景 C: 跨嵌套容器拖拽', { testIsolation: false 
         url: `http://127.0.0.1:8080/backend/sites/${TEST_SITE_ID}/pages/${getTestPageId()}`,
         headers: { 'X-User-ID': 'f7316395-f07f-4c3c-bead-5fa0820402ed', 'X-User-Role': 'admin', 'Content-Type': 'application/json' },
         body: { name: 'E2E 设计器测试', path: Cypress.env('testPagePath'), schema: presetSchema },
+      })
       })
     })
   })

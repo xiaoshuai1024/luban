@@ -54,7 +54,7 @@ describe('设计器 § 场景 D: 拖拽视觉反馈', { testIsolation: false }, 
 
   it('D1: 拖拽时显示对齐辅助线（垂直/水平）', () => {
     // 拖第一个节点，在拖拽过程中检测对齐线
-    cy.get('[data-node-id="node-a"]').then(($el) => {
+    cy.get('[data-node-id="node-a"]').first().then(($el) => {
       const rect = $el[0].getBoundingClientRect()
 
       // mousedown 开始拖拽
@@ -66,10 +66,10 @@ describe('设计器 § 场景 D: 拖拽视觉反馈', { testIsolation: false }, 
       })
 
       // mousemove 到与第二个节点左边缘对齐的位置
-      cy.get('[data-node-id="node-b"]').then(($b) => {
+      cy.get('[data-node-id="node-b"]').first().then(($b) => {
         const bRect = $b[0].getBoundingClientRect()
 
-        cy.get('[data-node-id="node-a"]').trigger('mousemove', {
+        cy.get('[data-node-id="node-a"]').first().trigger('mousemove', {
           clientX: bRect.left + 5, // 接近 node-b 左边缘，触发垂直对齐
           clientY: bRect.top + 100,
           force: true,
@@ -86,7 +86,7 @@ describe('设计器 § 场景 D: 拖拽视觉反馈', { testIsolation: false }, 
           cy.wrap($designer).should('exist')
         })
 
-        cy.get('[data-node-id="node-a"]').trigger('mouseup', { force: true })
+        cy.get('[data-node-id="node-a"]').first().trigger('mouseup', { force: true })
       })
     })
   })
@@ -97,10 +97,10 @@ describe('设计器 § 场景 D: 拖拽视觉反馈', { testIsolation: false }, 
     cy.log('⏳ D2 等距高亮（紫色线）依赖 W2 T-ui-3 实现，W1 阶段跳过断言')
 
     // 基础验证：拖拽不崩溃
-    cy.get('[data-node-id="node-b"]').then(($el) => {
+    cy.get('[data-node-id="node-b"]').first().then(($el) => {
       const rect = $el[0].getBoundingClientRect()
       cy.wrap($el).trigger('mousedown', { button: 0, clientX: rect.left + 10, clientY: rect.top + 10, force: true })
-      cy.get('[data-node-id="node-c"]').trigger('mousemove', { clientX: rect.left + 10, clientY: rect.top + 200, force: true })
+      cy.get('[data-node-id="node-c"]').first().trigger('mousemove', { clientX: rect.left + 10, clientY: rect.top + 200, force: true })
       cy.wrap($el).trigger('mouseup', { force: true })
       cy.wait(200)
       cy.get('[data-lb-node]').should('have.length.at.least', 3)
@@ -108,7 +108,7 @@ describe('设计器 § 场景 D: 拖拽视觉反馈', { testIsolation: false }, 
   })
 
   it('D3: 拖拽时显示间距数值标签', () => {
-    cy.get('[data-node-id="node-a"]').then(($el) => {
+    cy.get('[data-node-id="node-a"]').first().then(($el) => {
       const rect = $el[0].getBoundingClientRect()
 
       cy.wrap($el).trigger('mousedown', {
@@ -119,9 +119,9 @@ describe('设计器 § 场景 D: 拖拽视觉反馈', { testIsolation: false }, 
       })
 
       // 移动到与 node-b 有间距的位置
-      cy.get('[data-node-id="node-b"]').then(($b) => {
+      cy.get('[data-node-id="node-b"]').first().then(($b) => {
         const bRect = $b[0].getBoundingClientRect()
-        cy.get('[data-node-id="node-a"]').trigger('mousemove', {
+        cy.get('[data-node-id="node-a"]').first().trigger('mousemove', {
           clientX: bRect.left + 50,
           clientY: bRect.top + bRect.height + 30,
           force: true,
@@ -131,7 +131,7 @@ describe('设计器 § 场景 D: 拖拽视觉反馈', { testIsolation: false }, 
         // 间距标签可能渲染（W1 基础版可能没有，验证 overlay 容器存在即可）
         cy.get('.luban-designer').should('exist')
 
-        cy.get('[data-node-id="node-a"]').trigger('mouseup', { force: true })
+        cy.get('[data-node-id="node-a"]').first().trigger('mouseup', { force: true })
       })
     })
   })

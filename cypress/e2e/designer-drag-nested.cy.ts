@@ -67,49 +67,49 @@ describe('设计器 § 场景 C: 跨嵌套容器拖拽', { testIsolation: false 
     const token = Cypress.env('authToken') as string
     cy.loginWithToken(token, `/sites/${TEST_SITE_ID}/pages/${getTestPageId()}`)
     cy.get('.luban-designer', { timeout: 15000 }).should('exist')
-    // 等待 Row/Col 渲染
-    cy.get('[data-lb-node]', { timeout: 10000 }).should('have.length.at.least', 5)
+    // 等待 Row/Col 渲染（root + row + col1 + col2 + btn = 至少 4 个非 root 节点）
+    cy.get('[data-lb-node]', { timeout: 10000 }).should('have.length.at.least', 4)
   })
 
   it('C1: 从 Col1 拖按钮到 Col2', () => {
     // 确认初始状态：按钮在 col-1 内
-    cy.get('[data-node-id="col-1"]').find('[data-node-id="btn-in-col1"]').should('exist')
-    cy.get('[data-node-id="col-2"]').find('[data-node-id="btn-in-col1"]').should('not.exist')
+    cy.get('[data-node-id="col-1"]').first().find('[data-node-id="btn-in-col1"]').should('exist')
+    cy.get('[data-node-id="col-2"]').first().find('[data-node-id="btn-in-col1"]').should('not.exist')
 
     // 获取按钮和 Col2 的位置
-    cy.get('[data-node-id="btn-in-col1"]').then(($btn) => {
+    cy.get('[data-node-id="btn-in-col1"]').first().then(($btn) => {
       const btnRect = $btn[0].getBoundingClientRect()
 
-      cy.get('[data-node-id="col-2"]').then(($col2) => {
+      cy.get('[data-node-id="col-2"]').first().then(($col2) => {
         const col2Rect = $col2[0].getBoundingClientRect()
 
         // SortableJS 拖拽：mousedown on btn → mousemove to col2 → mouseup
-        cy.get('[data-node-id="btn-in-col1"]').trigger('mousedown', {
+        cy.get('[data-node-id="btn-in-col1"]').first().trigger('mousedown', {
           button: 0,
           clientX: btnRect.left + 20,
           clientY: btnRect.top + btnRect.height / 2,
           force: true,
         })
 
-        cy.get('[data-node-id="col-2"]').trigger('mousemove', {
+        cy.get('[data-node-id="col-2"]').first().trigger('mousemove', {
           clientX: col2Rect.left + col2Rect.width / 2,
           clientY: col2Rect.top + 20,
           force: true,
         })
 
-        cy.get('[data-node-id="col-2"]').trigger('mouseup', { force: true })
+        cy.get('[data-node-id="col-2"]').first().trigger('mouseup', { force: true })
         cy.wait(500)
 
         // 断言：按钮从 col-1 移到 col-2
-        cy.get('[data-node-id="col-1"]').find('[data-node-id="btn-in-col1"]').should('not.exist')
-        cy.get('[data-node-id="col-2"]').find('[data-node-id="btn-in-col1"]').should('exist')
+        cy.get('[data-node-id="col-1"]').first().find('[data-node-id="btn-in-col1"]').should('not.exist')
+        cy.get('[data-node-id="col-2"]').first().find('[data-node-id="btn-in-col1"]').should('exist')
       })
     })
   })
 
   it('C2: 从组件库拖新组件到 Col2 内部', () => {
     // 记录 col-2 当前子节点数
-    cy.get('[data-node-id="col-2"]').find('[data-lb-node]').then(($before) => {
+    cy.get('[data-node-id="col-2"]').first().find('[data-lb-node]').then(($before) => {
       const beforeCount = $before.length
 
       // HTML5 drag from panel → drop on col-2
@@ -119,13 +119,13 @@ describe('设计器 § 场景 C: 跨嵌套容器拖拽', { testIsolation: false 
         cy.wrap($el).trigger('dragstart', { dataTransfer, force: true })
 
         // drop 到 col-2 容器
-        cy.get('[data-node-id="col-2"]').trigger('dragover', { dataTransfer, force: true })
-        cy.get('[data-node-id="col-2"]').trigger('drop', { dataTransfer, force: true })
+        cy.get('[data-node-id="col-2"]').first().trigger('dragover', { dataTransfer, force: true })
+        cy.get('[data-node-id="col-2"]').first().trigger('drop', { dataTransfer, force: true })
 
         cy.wait(300)
 
         // 断言 col-2 子节点增加
-        cy.get('[data-node-id="col-2"]').find('[data-lb-node]').should('have.length', beforeCount + 1)
+        cy.get('[data-node-id="col-2"]').first().find('[data-lb-node]').should('have.length', beforeCount + 1)
       })
     })
   })
@@ -158,32 +158,32 @@ describe('设计器 § 场景 C: 跨嵌套容器拖拽', { testIsolation: false 
     cy.get('[data-lb-node]', { timeout: 10000 }).should('have.length', 2)
 
     // 尝试拖 Text 到 Button 内部
-    cy.get('[data-node-id="txt-orphan"]').then(($txt) => {
+    cy.get('[data-node-id="txt-orphan"]').first().then(($txt) => {
       const txtRect = $txt[0].getBoundingClientRect()
 
-      cy.get('[data-node-id="btn-non-container"]').then(($btn) => {
+      cy.get('[data-node-id="btn-non-container"]').first().then(($btn) => {
         const btnRect = $btn[0].getBoundingClientRect()
 
-        cy.get('[data-node-id="txt-orphan"]').trigger('mousedown', {
+        cy.get('[data-node-id="txt-orphan"]').first().trigger('mousedown', {
           button: 0,
           clientX: txtRect.left + 20,
           clientY: txtRect.top + txtRect.height / 2,
           force: true,
         })
 
-        cy.get('[data-node-id="btn-non-container"]').trigger('mousemove', {
+        cy.get('[data-node-id="btn-non-container"]').first().trigger('mousemove', {
           clientX: btnRect.left + btnRect.width / 2,
           clientY: btnRect.top + btnRect.height / 2,
           force: true,
         })
 
-        cy.get('[data-node-id="btn-non-container"]').trigger('mouseup', { force: true })
+        cy.get('[data-node-id="btn-non-container"]').first().trigger('mouseup', { force: true })
         cy.wait(300)
 
         // 断言：Text 没有变成 Button 的子节点（Button 不是容器）
-        cy.get('[data-node-id="btn-non-container"]').find('[data-node-id="txt-orphan"]').should('not.exist')
+        cy.get('[data-node-id="btn-non-container"]').first().find('[data-node-id="txt-orphan"]').should('not.exist')
         // Text 仍在 root 层级
-        cy.get('[data-node-id="txt-orphan"]').should('exist')
+        cy.get('[data-node-id="txt-orphan"]').first().should('exist')
       })
     })
   })

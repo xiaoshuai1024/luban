@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, shallowRef } from 'vue'
+import { ref, computed, onMounted, watch, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElButton, ElInput, ElMessage } from 'element-plus'
 import { getPage, savePage, createPage } from '@/api/page'
@@ -21,31 +21,20 @@ import { useDesignerKeyboard } from '@/composables/useDesignerKeyboard'
  * 所有 luban-low-code 组件通过动态 import 加载（避免引擎硬依赖）。
  */
 
-// ===== luban-low-code 动态导入的类型（运行时从模块获取） =====
-type DesignerToolbarInstance = InstanceType<ReturnType<typeof defineAsyncType>>
 type DeviceType = 'pc' | 'tablet' | 'mobile'
 type EditorMode = 'design' | 'preview' | 'code'
 type MenuAction = 'copy' | 'paste' | 'delete' | 'bring-front' | 'send-back' | 'move-up' | 'move-down'
 
-// 辅助：仅为类型推断占位
-function defineAsyncType() {
-  return class {
-    canUndo = false
-    canRedo = false
-    device = 'pc' as DeviceType
-    mode = 'design' as EditorMode
-  }
-}
-
 // ===== 动态加载的 luban-low-code 模块 =====
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 interface LubanLowCodeModule {
-  LubanDesigner: unknown
-  DesignerToolbar: unknown
-  PropertyPanel: unknown
-  ComponentPanel: unknown
-  OutlineTree: unknown
-  ContextMenu: unknown
-  CodeEditor: unknown
+  LubanDesigner: any
+  DesignerToolbar: any
+  PropertyPanel: any
+  ComponentPanel: any
+  OutlineTree: any
+  ContextMenu: any
+  CodeEditor: any
   useHistory: (initial: PageSchema) => {
     current: { value: PageSchema }
     push: (s: PageSchema) => void
@@ -55,13 +44,8 @@ interface LubanLowCodeModule {
     canRedo: { value: boolean }
     reset: (s: PageSchema) => void
   }
-  getComponentMeta: (type: string) => {
-    type: string
-    label: string
-    propSchema?: Record<string, unknown>
-    styleSchema?: Record<string, unknown>
-    defaultProps?: Record<string, unknown>
-  } | undefined
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getComponentMeta: (type: string) => any | undefined
   findNode: (root: NodeSchema, id: string) => NodeSchema | null
   findParent: (root: NodeSchema, childId: string) => NodeSchema | null
   removeNode: (root: NodeSchema, id: string) => boolean
@@ -72,7 +56,6 @@ interface LubanLowCodeModule {
   bringToFront: (root: NodeSchema, id: string) => boolean
   sendToBack: (root: NodeSchema, id: string) => boolean
   genNodeId: (type: string) => string
-  getMaterial?: (name: string) => { component?: unknown } | undefined
 }
 
 const route = useRoute()
@@ -160,7 +143,7 @@ const canvasWidth = computed(() => {
 // ===== 加载 luban-low-code 模块 =====
 onMounted(async () => {
   try {
-    const m = (await import(/* @vite-ignore */ 'luban-low-code')) as LubanLowCodeModule
+    const m = (await import(/* @vite-ignore */ 'luban-low-code')) as unknown as LubanLowCodeModule
     llc.value = m
     LubanDesignerC.value = m.LubanDesigner
     DesignerToolbarC.value = m.DesignerToolbar

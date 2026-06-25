@@ -16,7 +16,7 @@ describe('Sites management', () => {
         cy.contains('详情').click()
       })
     })
-    cy.url().should('match', /\\/sites\\/.+/)
+    cy.url().should('match', /\/sites\/.+/)
     cy.contains('站点信息').should('be.visible')
   })
 
@@ -27,8 +27,8 @@ describe('Sites management', () => {
         cy.contains('页面').click()
       })
     })
-    cy.url().should('match', /\\/sites\\/.+\\/pages$/)
+    cy.url().should('match', /\/sites\/.+\/pages$/)
     cy.contains('站点：').should('be.visible')
     cy.contains('button', '新建页面').should('be.visible')
   })
-}
+})

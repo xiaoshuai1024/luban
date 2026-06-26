@@ -1,7 +1,7 @@
 import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import type { LoginPayload, LoginResult } from '@/api/auth';
 import type { Site } from '@/api/site';
-import type { PageMeta } from '@/api/page';
+import type { PageMeta, PageVersion } from '@/api/page';
 import type { User, UserCreatePayload, UserUpdatePayload } from '@/api/user';
 import type { SystemSettings } from '@/api/settings';
 import type { PageSchema } from '@/types/schema';
@@ -220,6 +220,61 @@ function handlePages(config: AxiosRequestConfig): AxiosResponse | null {
   const method = (config.method ?? 'get').toLowerCase();
   const matchList = url.match(/^\/sites\/([^/]+)\/pages$/);
   const matchDetail = url.match(/^\/sites\/([^/]+)\/pages\/([^/]+)$/);
+
+  // ---- Wave 2: 发布闭环 mock handlers ----
+  const matchPublish = url.match(/^\/sites\/([^/]+)\/pages\/([^/]+)\/publish$/);
+  if (matchPublish && method === 'post') {
+    const authError = requireAuth(config);
+    if (authError) return authError;
+    const idx = mockContext.pages.findIndex(
+      (p) => p.siteId === matchPublish[1] && p.id === matchPublish[2],
+    );
+    if (idx === -1) return createResponse(config, { message: 'Page not found' } as Record<string, unknown>, 404);
+    mockContext.pages[idx] = { ...mockContext.pages[idx], status: 'published', updatedAt: formatDateTime() };
+    return createResponse(config, mockContext.pages[idx]);
+  }
+
+  const matchUnpublish = url.match(/^\/sites\/([^/]+)\/pages\/([^/]+)\/unpublish$/);
+  if (matchUnpublish && method === 'post') {
+    const authError = requireAuth(config);
+    if (authError) return authError;
+    const idx = mockContext.pages.findIndex(
+      (p) => p.siteId === matchUnpublish[1] && p.id === matchUnpublish[2],
+    );
+    if (idx === -1) return createResponse(config, { message: 'Page not found' } as Record<string, unknown>, 404);
+    mockContext.pages[idx] = { ...mockContext.pages[idx], status: 'archived', updatedAt: formatDateTime() };
+    return createResponse(config, mockContext.pages[idx]);
+  }
+
+  const matchPreview = url.match(/^\/sites\/([^/]+)\/pages\/([^/]+)\/preview$/);
+  if (matchPreview && method === 'get') {
+    const authError = requireAuth(config);
+    if (authError) return authError;
+    const page = mockContext.pages.find(
+      (p) => p.siteId === matchPreview[1] && p.id === matchPreview[2],
+    );
+    if (!page) return createResponse(config, { message: 'Page not found' } as Record<string, unknown>, 404);
+    return createResponse(config, { ...page, status: 'draft' });
+  }
+
+  const matchVersions = url.match(/^\/sites\/([^/]+)\/pages\/([^/]+)\/versions$/);
+  if (matchVersions && method === 'get') {
+    const authError = requireAuth(config);
+    if (authError) return authError;
+    return createResponse(config, [] as PageVersion[]);
+  }
+
+  const matchRollback = url.match(/^\/sites\/([^/]+)\/pages\/([^/]+)\/versions\/([^/]+)\/rollback$/);
+  if (matchRollback && method === 'post') {
+    const authError = requireAuth(config);
+    if (authError) return authError;
+    const page = mockContext.pages.find(
+      (p) => p.siteId === matchRollback[1] && p.id === matchRollback[2],
+    );
+    if (!page) return createResponse(config, { message: 'Not found' } as Record<string, unknown>, 404);
+    return createResponse(config, page);
+  }
+  // ---- 发布闭环 mock handlers END ----
 
   if (matchList) {
     const authError = requireAuth(config);

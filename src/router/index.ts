@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { getToken } from '@/api/request';
+import { useUserStore } from '@/stores/user';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -53,16 +54,22 @@ const router = createRouter({
           meta: { title: '页面编辑' },
         },
         {
+          path: 'sites/:siteId/pages/:pageId/preview',
+          name: 'PagePreview',
+          component: () => import('@/views/page/PagePreview.vue'),
+          meta: { title: '草稿预览' },
+        },
+        {
           path: 'users',
           name: 'UserList',
           component: () => import('@/views/user/UserList.vue'),
-          meta: { title: '用户管理' },
+          meta: { title: '用户管理', requiresAdmin: true },
         },
         {
           path: 'settings',
           name: 'Settings',
           component: () => import('@/views/settings/Settings.vue'),
-          meta: { title: '系统设置' },
+          meta: { title: '系统设置', requiresAdmin: true },
         },
       ],
     },
@@ -75,6 +82,14 @@ router.beforeEach((to, _from, next) => {
   if (!isPublic && !token) {
     next({ path: '/login' });
     return;
+  }
+  // Wave 2: admin 路由守卫
+  if (to.meta.requiresAdmin === true) {
+    const userStore = useUserStore();
+    if (!userStore.isAdmin) {
+      next({ path: '/dashboard' });
+      return;
+    }
   }
   if (to.path === '/login' && token) {
     next({ path: '/dashboard' });

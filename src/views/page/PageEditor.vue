@@ -1,9 +1,23 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, shallowRef } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElButton, ElInput, ElFormItem, ElForm, ElMessage, ElCard } from 'element-plus';
-import { getPage, savePage, createPage } from '@/api/page';
+import {
+  ElButton,
+  ElInput,
+  ElFormItem,
+  ElForm,
+  ElMessage,
+  ElCard,
+  ElTag,
+} from 'element-plus';
+import {
+  getPage,
+  savePage,
+  createPage,
+  publishPage,
+} from '@/api/page';
 import type { PageSchema } from '@/types/schema';
+import VersionHistoryDrawer from './VersionHistoryDrawer.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -13,11 +27,14 @@ const isNew = computed(() => route.name === 'PageNew' || route.meta.isNew);
 
 const pageName = ref('');
 const pagePath = ref('');
+const pageStatus = ref<string>('draft');
 const schema = ref<PageSchema | null>(null);
 const loading = ref(false);
 const saving = ref(false);
+const publishing = ref(false);
 const designerError = ref<string | null>(null);
 const DesignerComponent = shallowRef<unknown>(null);
+const versionDrawerVisible = ref(false);
 
 onMounted(() => {
   import(/* @vite-ignore */ 'luban-low-code')
@@ -36,6 +53,7 @@ async function loadPage() {
     if (isNew.value) {
       pageName.value = '';
       pagePath.value = '';
+      pageStatus.value = 'draft';
       schema.value = {
         root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
       };
@@ -43,6 +61,7 @@ async function loadPage() {
       const { data } = await getPage(siteId.value, pageId.value);
       pageName.value = data.name;
       pagePath.value = data.path;
+      pageStatus.value = data.status ?? 'draft';
       schema.value = data.schema ?? {
         root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
       };
@@ -85,9 +104,52 @@ async function handleSave() {
   }
 }
 
+async function handlePublish() {
+  if (!siteId.value || !pageId.value) return;
+  publishing.value = true;
+  try {
+    // 先保存草稿，再发布
+    if (schema.value) {
+      await savePage(siteId.value, pageId.value, {
+        name: pageName.value,
+        path: pagePath.value,
+        schema: schema.value,
+      });
+    }
+    const { data } = await publishPage(siteId.value, pageId.value);
+    pageStatus.value = data.status ?? 'published';
+    ElMessage.success('发布成功');
+  } catch (e) {
+    ElMessage.error((e as Error).message || '发布失败');
+  } finally {
+    publishing.value = false;
+  }
+}
+
+function handlePreview() {
+  if (!siteId.value || !pageId.value) return;
+  // 新窗口打开草稿预览页
+  const url = router.resolve(
+    `/sites/${siteId.value}/pages/${pageId.value}/preview`,
+  ).href;
+  window.open(url, '_blank');
+}
+
 function goBack() {
   router.push(`/sites/${siteId.value}/pages`);
 }
+
+const statusTagType = computed(() => {
+  if (pageStatus.value === 'published') return 'success';
+  if (pageStatus.value === 'archived') return 'danger';
+  return 'info';
+});
+
+const statusTagText = computed(() => {
+  if (pageStatus.value === 'published') return '已发布';
+  if (pageStatus.value === 'archived') return '已下线';
+  return '草稿';
+});
 
 onMounted(loadPage);
 watch([siteId, pageId], loadPage);
@@ -104,18 +166,43 @@ watch([siteId, pageId], loadPage);
           <ElInput v-model="pagePath" placeholder="/page-path" style="width: 200px" />
         </ElFormItem>
         <ElFormItem>
-          <ElButton type="primary" :loading="saving" @click="handleSave">保存</ElButton>
+          <ElTag :type="statusTagType" size="small">{{ statusTagText }}</ElTag>
+        </ElFormItem>
+        <ElFormItem>
+          <ElButton type="primary" :loading="saving" @click="handleSave">
+            保存草稿
+          </ElButton>
+          <ElButton
+            v-if="!isNew"
+            type="success"
+            :loading="publishing"
+            @click="handlePublish"
+          >
+            发布
+          </ElButton>
+          <ElButton v-if="!isNew" @click="handlePreview">预览草稿</ElButton>
+          <ElButton v-if="!isNew" @click="versionDrawerVisible = true">
+            版本历史
+          </ElButton>
           <ElButton @click="goBack">返回列表</ElButton>
         </ElFormItem>
       </ElForm>
     </ElCard>
 
-    <ElCard v-if="designerError" class="page-editor__designer" shadow="never">
+    <ElCard
+      v-if="designerError"
+      class="page-editor__designer"
+      shadow="never"
+    >
       <p class="page-editor__error">{{ designerError }}</p>
       <p v-if="schema" class="page-editor__hint">当前 Schema 已加载，保存时将一并提交。</p>
     </ElCard>
 
-    <ElCard v-else-if="DesignerComponent && schema" class="page-editor__designer" shadow="never">
+    <ElCard
+      v-else-if="DesignerComponent && schema"
+      class="page-editor__designer"
+      shadow="never"
+    >
       <component
         :is="DesignerComponent"
         v-model:schema="schema"
@@ -123,6 +210,15 @@ watch([siteId, pageId], loadPage);
         placeholder="从左侧拖拽组件到此处"
       />
     </ElCard>
+
+    <!-- 版本历史抽屉 -->
+    <VersionHistoryDrawer
+      v-if="!isNew && siteId && pageId"
+      v-model:visible="versionDrawerVisible"
+      :site-id="siteId"
+      :page-id="pageId"
+      @rolled-back="loadPage"
+    />
   </div>
 </template>
 

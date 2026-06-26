@@ -38,3 +38,39 @@ export function savePage(
 export function deletePage(siteId: string, pageId: string) {
   return request.delete(`/sites/${siteId}/pages/${pageId}`);
 }
+
+// ==================== P0 发布闭环 ====================
+
+export function publishPage(siteId: string, pageId: string) {
+  return request.post<PageMeta>(`/sites/${siteId}/pages/${pageId}/publish`);
+}
+
+export function unpublishPage(siteId: string, pageId: string) {
+  return request.post<PageMeta>(`/sites/${siteId}/pages/${pageId}/unpublish`);
+}
+
+export function previewPageDraft(siteId: string, pageId: string) {
+  return request.get<PageMeta>(`/sites/${siteId}/pages/${pageId}/preview`);
+}
+
+// ==================== 版本历史 ====================
+
+export interface PageVersion {
+  id: string;
+  pageId: string;
+  versionNo: number;
+  schema?: PageSchema;
+  summary?: string;
+  createdBy?: string;
+  createdAt?: string;
+}
+
+export function getPageVersions(siteId: string, pageId: string) {
+  return request.get<PageVersion[]>(`/sites/${siteId}/pages/${pageId}/versions`);
+}
+
+export function rollbackPage(siteId: string, pageId: string, versionId: string) {
+  return request.post<PageMeta>(
+    `/sites/${siteId}/pages/${pageId}/versions/${versionId}/rollback`,
+  );
+}

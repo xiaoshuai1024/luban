@@ -2,9 +2,9 @@ name: Lint
 
 on:
   pull_request:
-    branches: [master, main]
+    branches: [master, main, dev]
   push:
-    branches: [master, main]
+    branches: [master, main, dev]
 
 permissions:
   contents: read
@@ -22,9 +22,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: pnpm
-          cache-dependency-path: packages/engine/luban/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

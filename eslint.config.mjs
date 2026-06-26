@@ -92,7 +92,7 @@ export default tseslint.config(
             { from: 'stores', allow: ['types', 'api'] },
             { from: 'mocks', allow: ['types', 'api'] },
             { from: 'layouts', allow: ['stores', 'api', 'types'] },
-            { from: 'views', allow: ['stores', 'api', 'types', 'utils', 'layouts'] },
+            { from: 'views', allow: ['stores', 'api', 'types', 'utils', 'layouts', 'views'] },
             { from: 'router', allow: ['api', 'layouts', 'views'] },
             { from: 'styles', allow: [] },
           ],

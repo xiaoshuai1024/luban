@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElButton, ElTable, ElTableColumn, ElMessage, ElMessageBox, ElTag } from 'element-plus';
-import { getPages, deletePage, type PageMeta } from '@/api/page';
+import { getPages, deletePage, publishPage, unpublishPage, type PageMeta } from '@/api/page';
 import { getSite } from '@/api/site';
 import { buildPublishedPagePreviewUrl } from '@/utils/publicPage';
 
@@ -14,6 +14,7 @@ const siteSlug = ref('');
 const siteBaseUrl = ref('');
 const list = ref<PageMeta[]>([]);
 const loading = ref(false);
+const actionLoading = ref<string | null>(null);
 
 async function fetchSite() {
   if (!siteId.value) return;
@@ -65,6 +66,41 @@ function openPublishedPreview(row: PageMeta) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
+async function handlePublish(row: PageMeta) {
+  actionLoading.value = row.id;
+  try {
+    await publishPage(siteId.value, row.id);
+    ElMessage.success('发布成功');
+    fetchList();
+  } catch (e) {
+    ElMessage.error((e as Error).message || '发布失败');
+  } finally {
+    actionLoading.value = null;
+  }
+}
+
+async function handleUnpublish(row: PageMeta) {
+  try {
+    await ElMessageBox.confirm(
+      `确定下线页面「${row.name}」？下线后访客将无法访问。`,
+      '下线确认',
+      { type: 'warning', confirmButtonText: '确认下线', cancelButtonText: '取消' },
+    );
+  } catch {
+    return;
+  }
+  actionLoading.value = row.id;
+  try {
+    await unpublishPage(siteId.value, row.id);
+    ElMessage.success('已下线');
+    fetchList();
+  } catch (e) {
+    ElMessage.error((e as Error).message || '下线失败');
+  } finally {
+    actionLoading.value = null;
+  }
+}
+
 async function handleDelete(row: PageMeta) {
   await ElMessageBox.confirm(`确定删除页面「${row.name}」？`, '提示', { type: 'warning' });
   try {
@@ -74,6 +110,18 @@ async function handleDelete(row: PageMeta) {
   } catch (e) {
     ElMessage.error((e as Error).message || '删除失败');
   }
+}
+
+function statusTagType(status?: string) {
+  if (status === 'published') return 'success';
+  if (status === 'archived') return 'danger';
+  return 'info';
+}
+
+function statusTagText(status?: string) {
+  if (status === 'published') return '已发布';
+  if (status === 'archived') return '已下线';
+  return '草稿';
 }
 
 onMounted(() => {
@@ -91,19 +139,39 @@ onMounted(() => {
     <ElTable v-loading="loading" :data="list" stripe>
       <ElTableColumn prop="name" label="页面名称" min-width="160" />
       <ElTableColumn prop="path" label="路径" min-width="120" />
-      <ElTableColumn prop="status" label="状态" width="100">
+      <ElTableColumn label="状态" width="100">
         <template #default="{ row }">
-          <ElTag size="small">{{ row.status ?? 'draft' }}</ElTag>
+          <ElTag :type="statusTagType(row.status)" size="small">
+            {{ statusTagText(row.status) }}
+          </ElTag>
         </template>
       </ElTableColumn>
       <ElTableColumn prop="updatedAt" label="更新时间" width="180" />
-      <ElTableColumn label="操作" width="200" fixed="right">
+      <ElTableColumn label="操作" width="280" fixed="right">
         <template #default="{ row }">
           <ElButton link type="primary" @click="goEdit(row)">编辑</ElButton>
           <ElButton
-            v-if="row.status === 'published'"
+            v-if="row.status !== 'published'"
             link
             type="success"
+            :loading="actionLoading === row.id"
+            @click="handlePublish(row)"
+          >
+            发布
+          </ElButton>
+          <ElButton
+            v-if="row.status === 'published'"
+            link
+            type="warning"
+            :loading="actionLoading === row.id"
+            @click="handleUnpublish(row)"
+          >
+            下线
+          </ElButton>
+          <ElButton
+            v-if="row.status === 'published'"
+            link
+            type="info"
             @click="openPublishedPreview(row)"
           >
             预览

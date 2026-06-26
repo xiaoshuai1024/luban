@@ -71,8 +71,8 @@
   },
   "pnpm": {
     "overrides": {
-      "luban-base": "link:../luban-ui/packages/luban-base",
-      "luban-low-code": "link:../luban-ui/packages/luban-low-code"
+      "luban-base": "link:../../ui/luban-ui/packages/luban-base",
+      "luban-low-code": "link:../../ui/luban-ui/packages/luban-low-code"
     }
   }
 }

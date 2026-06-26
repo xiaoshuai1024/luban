@@ -212,13 +212,18 @@ async function loadPage() {
   }
 }
 
-// ===== schema 变更 → 同步到 history =====
+// ===== schema 变更 → 同步到 history（debounce 500ms，避免连续 @input 过多快照）=====
+let historyTimer: ReturnType<typeof setTimeout> | null = null
 function onSchemaUpdate(newSchema: PageSchema | null) {
   if (!newSchema) return
   schema.value = newSchema
-  // 推入历史栈（undo/redo 时跳过，避免循环）
+  // 推入历史栈（undo/redo 时跳过，避免循环；debounce 避免连续输入过多快照）
   if (history.value && !isUndoRedoing.value) {
-    history.value.push(JSON.parse(JSON.stringify(newSchema)))
+    if (historyTimer) clearTimeout(historyTimer)
+    historyTimer = setTimeout(() => {
+      history.value!.push(JSON.parse(JSON.stringify(schema.value)))
+      historyTimer = null
+    }, 500)
   }
 }
 

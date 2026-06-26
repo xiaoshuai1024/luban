@@ -39,9 +39,9 @@ describe('设计器 § 场景 E: IDE 完整编辑流程', { testIsolation: false
     // 排除搜索框，选实际的属性字段输入框
     cy.get('.lb-property-panel').find('.lb-property-field input[type="text"]').first().then(($input) => {
       cy.wrap($input).clear({ force: true }).type('修改后的文案', { force: true })
-      cy.wrap($input).trigger('change', { force: true })
+      cy.wrap($input).trigger('input', { force: true })
     })
-    cy.wait(500)
+    cy.wait(800) // 等 debounce history push
     cy.get('[data-node-id="node-btn"]').should('contain', '修改后的文案')
 
     // 用工具栏 undo 按钮代替键盘快捷键（更可靠）

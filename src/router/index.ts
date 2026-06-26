@@ -1,5 +1,5 @@
-import { createRouter, createWebHistory } from 'vue-router'
-import { getToken } from '@/api/request'
+import { createRouter, createWebHistory } from 'vue-router';
+import { getToken } from '@/api/request';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -67,20 +67,20 @@ const router = createRouter({
       ],
     },
   ],
-})
+});
 
 router.beforeEach((to, _from, next) => {
-  const token = getToken()
-  const isPublic = to.meta.public === true
+  const token = getToken();
+  const isPublic = to.meta.public === true;
   if (!isPublic && !token) {
-    next({ path: '/login' })
-    return
+    next({ path: '/login' });
+    return;
   }
   if (to.path === '/login' && token) {
-    next({ path: '/dashboard' })
-    return
+    next({ path: '/dashboard' });
+    return;
   }
-  next()
-})
+  next();
+});
 
-export default router
+export default router;

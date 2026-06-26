@@ -5,8 +5,8 @@ interface BuildPreviewUrlOptions {
 }
 
 function normalizePath(path?: string): string {
-  if (!path) return "/";
-  return path.startsWith("/") ? path : `/${path}`;
+  if (!path) return '/';
+  return path.startsWith('/') ? path : `/${path}`;
 }
 
 export function buildPublishedPagePreviewUrl({

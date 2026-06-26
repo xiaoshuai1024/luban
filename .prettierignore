@@ -1,0 +1,7 @@
+dist
+node_modules
+pnpm-lock.yaml
+coverage
+*.timestamp-*
+.cypress
+cypress/e2e

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted } from 'vue';
 import {
   ElButton,
   ElTable,
@@ -14,132 +14,139 @@ import {
   ElMessageBox,
   ElTag,
   ElPagination,
-} from 'element-plus'
-import { getUsers, createUser, updateUser, setUserStatus, type User, type UserCreatePayload } from '@/api/user'
-import { formatDateTime } from '@/utils/datetime'
-import { AxiosError } from 'axios'
+} from 'element-plus';
+import {
+  getUsers,
+  createUser,
+  updateUser,
+  setUserStatus,
+  type User,
+  type UserCreatePayload,
+} from '@/api/user';
+import { formatDateTime } from '@/utils/datetime';
+import type { AxiosError } from 'axios';
 
-const list = ref<User[]>([])
-const total = ref(0)
-const loading = ref(false)
-const page = ref(1)
-const pageSize = ref(10)
-const keyword = ref('')
-const dialogVisible = ref(false)
-const editingId = ref<string | null>(null)
+const list = ref<User[]>([]);
+const total = ref(0);
+const loading = ref(false);
+const page = ref(1);
+const pageSize = ref(10);
+const keyword = ref('');
+const dialogVisible = ref(false);
+const editingId = ref<string | null>(null);
 const form = ref<UserCreatePayload & { id?: string }>({
   username: '',
   password: '',
   name: '',
   role: 'user',
-})
-const formLoading = ref(false)
-const noPermission = ref(false)
+});
+const formLoading = ref(false);
+const noPermission = ref(false);
 
 async function fetchList() {
-  loading.value = true
+  loading.value = true;
   try {
     const { data } = await getUsers({
       page: page.value,
       size: pageSize.value,
       keyword: keyword.value || undefined,
-    })
-    list.value = data?.list ?? []
-    total.value = data?.total ?? 0
-    noPermission.value = false
+    });
+    list.value = data?.list ?? [];
+    total.value = data?.total ?? 0;
+    noPermission.value = false;
   } catch (e) {
-    const status = (e as AxiosError).response?.status
+    const status = (e as AxiosError).response?.status;
     if (status === 403) {
-      noPermission.value = true
-      ElMessage.error('当前账号没有用户管理权限，请使用管理员账号登录')
+      noPermission.value = true;
+      ElMessage.error('当前账号没有用户管理权限，请使用管理员账号登录');
     }
-    list.value = []
-    total.value = 0
+    list.value = [];
+    total.value = 0;
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 function openCreate() {
-  editingId.value = null
-  form.value = { username: '', password: '', name: '', role: 'user' }
-  dialogVisible.value = true
+  editingId.value = null;
+  form.value = { username: '', password: '', name: '', role: 'user' };
+  dialogVisible.value = true;
 }
 
 function openEdit(row: User) {
-  editingId.value = row.id
+  editingId.value = row.id;
   form.value = {
     username: row.username,
     name: row.name ?? '',
     role: (row.role as string) ?? 'user',
-  }
-  dialogVisible.value = true
+  };
+  dialogVisible.value = true;
 }
 
 async function submitForm() {
   if (!form.value.username) {
-    ElMessage.warning('请输入账号')
-    return
+    ElMessage.warning('请输入账号');
+    return;
   }
   if (!editingId.value && !form.value.password) {
-    ElMessage.warning('请输入密码')
-    return
+    ElMessage.warning('请输入密码');
+    return;
   }
-  formLoading.value = true
+  formLoading.value = true;
   try {
     if (editingId.value) {
       await updateUser(editingId.value, {
         username: form.value.username,
         name: form.value.name,
         role: form.value.role,
-      })
-      ElMessage.success('更新成功')
+      });
+      ElMessage.success('更新成功');
     } else {
       await createUser({
         username: form.value.username,
         password: form.value.password!,
         name: form.value.name,
         role: form.value.role,
-      })
-      ElMessage.success('创建成功')
+      });
+      ElMessage.success('创建成功');
     }
-    dialogVisible.value = false
-    fetchList()
+    dialogVisible.value = false;
+    fetchList();
   } catch (e) {
-    ElMessage.error((e as Error).message || '操作失败')
+    ElMessage.error((e as Error).message || '操作失败');
   } finally {
-    formLoading.value = false
+    formLoading.value = false;
   }
 }
 
 async function handleStatus(row: User) {
-  const next = row.status === 'active' ? 'disabled' : 'active'
+  const next = row.status === 'active' ? 'disabled' : 'active';
   await ElMessageBox.confirm(
     `确定${next === 'active' ? '启用' : '禁用'}用户「${row.username}」？`,
     '提示',
-    { type: 'warning' }
-  )
+    { type: 'warning' },
+  );
   try {
-    await setUserStatus(row.id, next)
-    ElMessage.success('操作成功')
-    fetchList()
+    await setUserStatus(row.id, next);
+    ElMessage.success('操作成功');
+    fetchList();
   } catch (e) {
-    ElMessage.error((e as Error).message || '操作失败')
+    ElMessage.error((e as Error).message || '操作失败');
   }
 }
 
 function onPageChange(p: number) {
-  page.value = p
-  fetchList()
+  page.value = p;
+  fetchList();
 }
 
 function onSizeChange(s: number) {
-  pageSize.value = s
-  page.value = 1
-  fetchList()
+  pageSize.value = s;
+  page.value = 1;
+  fetchList();
 }
 
-onMounted(fetchList)
+onMounted(fetchList);
 </script>
 
 <template>
@@ -155,7 +162,7 @@ onMounted(fetchList)
       <ElButton type="primary" @click="fetchList">查询</ElButton>
       <ElButton type="primary" :disabled="noPermission" @click="openCreate">新建用户</ElButton>
     </div>
-    <ElTable :data="list" v-loading="loading" stripe>
+    <ElTable v-loading="loading" :data="list" stripe>
       <ElTableColumn prop="username" label="账号" min-width="120" />
       <ElTableColumn prop="name" label="姓名" min-width="100" />
       <ElTableColumn prop="role" label="角色" width="100" />

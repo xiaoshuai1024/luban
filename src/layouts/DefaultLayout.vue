@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
-import { useUserStore } from '@/stores'
-import { logout } from '@/api/auth'
+import { useRouter } from 'vue-router';
+import { useUserStore } from '@/stores';
+import { logout } from '@/api/auth';
 import {
   ElContainer,
   ElAside,
@@ -9,39 +9,27 @@ import {
   ElMain,
   ElMenu,
   ElMenuItem,
-  ElSubMenu,
   ElDropdown,
   ElDropdownItem,
   ElDropdownMenu,
   ElIcon,
-} from 'element-plus'
-import {
-  DataBoard,
-  Collection,
-  Document,
-  User,
-  Setting,
-  ArrowRight,
-} from '@element-plus/icons-vue'
+} from 'element-plus';
+import { DataBoard, Collection, User, Setting, ArrowRight } from '@element-plus/icons-vue';
 
-const router = useRouter()
-const userStore = useUserStore()
+const router = useRouter();
+const userStore = useUserStore();
 
 const menuItems = [
   { path: '/dashboard', title: '工作台', icon: DataBoard },
   { path: '/sites', title: '站点管理', icon: Collection },
   { path: '/users', title: '用户管理', icon: User },
   { path: '/settings', title: '系统设置', icon: Setting },
-]
+];
 
 function handleLogout() {
-  logout()
-  userStore.clearAuth()
-  router.push('/login')
-}
-
-function go(path: string) {
-  router.push(path)
+  logout();
+  userStore.clearAuth();
+  router.push('/login');
 }
 </script>
 
@@ -57,11 +45,7 @@ function go(path: string) {
         text-color="#bfcbd9"
         active-text-color="#409eff"
       >
-        <ElMenuItem
-          v-for="item in menuItems"
-          :key="item.path"
-          :index="item.path"
-        >
+        <ElMenuItem v-for="item in menuItems" :key="item.path" :index="item.path">
           <ElIcon><component :is="item.icon" /></ElIcon>
           <span>{{ item.title }}</span>
         </ElMenuItem>
@@ -133,7 +117,7 @@ function go(path: string) {
   align-items: center;
   justify-content: space-between;
   background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 8%);
 }
 
 .default-layout__title {

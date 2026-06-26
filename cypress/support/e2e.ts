@@ -1,7 +1,9 @@
 // ***********************************************************
-// This example support/e2e.ts is processed and
-// loaded automatically before your test files.
+// This example support/e2e.ts is processed before test files
 // ***********************************************************
 
-// Import commands.js using ES2015 syntax:
-import './commands';
+// @4tw/cypress-drag-drop 插件注册（提供 .drag() 命令）
+import '@4tw/cypress-drag-drop'
+
+// Import commands.js
+import './commands'

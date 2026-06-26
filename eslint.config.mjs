@@ -78,8 +78,8 @@ export default tseslint.config(
       ],
     },
     rules: {
-      'boundaries/no-unknown': 'warn',
-      'boundaries/no-ignored': 'warn',
+      'boundaries/no-unknown': 'error',
+      'boundaries/no-ignored': 'error',
       'boundaries/element-types': [
         'error',
         {

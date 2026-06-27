@@ -45,11 +45,7 @@ function backToEditor() {
       <ElButton type="primary" size="small" @click="backToEditor">返回编辑</ElButton>
     </div>
     <div class="page-preview__canvas">
-      <component
-        :is="LubanPageComponent"
-        v-if="LubanPageComponent && schema"
-        :schema="schema"
-      />
+      <component :is="LubanPageComponent" v-if="LubanPageComponent && schema" :schema="schema" />
       <p v-else-if="!loading" class="page-preview__empty">无内容可预览</p>
     </div>
   </div>

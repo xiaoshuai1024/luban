@@ -6,16 +6,20 @@ import ElementPlus from 'element-plus';
 import PageList from '@/views/page/PageList.vue';
 
 vi.mock('@/api/page', () => ({
-  getPages: vi.fn().mockResolvedValue({ data: [
-    { id: 'p1', name: 'Home', path: '/home', status: 'published', updatedAt: '2026-06-27' },
-    { id: 'p2', name: 'About', path: '/about', status: 'draft', updatedAt: '2026-06-27' },
-  ] }),
+  getPages: vi.fn().mockResolvedValue({
+    data: [
+      { id: 'p1', name: 'Home', path: '/home', status: 'published', updatedAt: '2026-06-27' },
+      { id: 'p2', name: 'About', path: '/about', status: 'draft', updatedAt: '2026-06-27' },
+    ],
+  }),
   deletePage: vi.fn().mockResolvedValue({}),
   publishPage: vi.fn().mockResolvedValue({ data: { status: 'published' } }),
   unpublishPage: vi.fn().mockResolvedValue({ data: { status: 'archived' } }),
 }));
 vi.mock('@/api/site', () => ({
-  getSite: vi.fn().mockResolvedValue({ data: { id: 's1', name: 'Test', slug: 'test', baseUrl: 'https://test.com' } }),
+  getSite: vi.fn().mockResolvedValue({
+    data: { id: 's1', name: 'Test', slug: 'test', baseUrl: 'https://test.com' },
+  }),
 }));
 vi.mock('@/utils/publicPage', () => ({
   buildPublishedPagePreviewUrl: vi.fn(() => 'https://test.com/home'),

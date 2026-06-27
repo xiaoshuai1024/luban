@@ -15,7 +15,11 @@ vi.mock('@/api/request', () => ({
 const router = createRouter({
   history: createMemoryHistory(),
   routes: [
-    { path: '/', component: DefaultLayout, children: [{ path: 'dashboard', component: { template: '<div/>' } }] },
+    {
+      path: '/',
+      component: DefaultLayout,
+      children: [{ path: 'dashboard', component: { template: '<div/>' } }],
+    },
   ],
 });
 

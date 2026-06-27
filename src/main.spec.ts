@@ -6,7 +6,11 @@ vi.mock('element-plus', () => ({ default: { install: () => {} } }));
 vi.mock('vue', () => ({ createApp: () => ({ use: () => {}, mount: () => {} }) }));
 vi.mock('./App.vue', () => ({ default: {} }));
 vi.mock('./router', () => ({ default: {} }));
-vi.mock('./api/request', () => ({ getToken: () => null, setToken: () => {}, clearToken: () => {} }));
+vi.mock('./api/request', () => ({
+  getToken: () => null,
+  setToken: () => {},
+  clearToken: () => {},
+}));
 vi.mock('./api/auth', () => ({ getCurrentUser: vi.fn() }));
 
 describe('main.ts', () => {

@@ -36,6 +36,8 @@ describe('SiteList.vue', () => {
 
   it('renders table element', () => {
     const wrapper = mountSiteList();
-    expect(wrapper.find('.el-table').exists() || wrapper.findComponent({ name: 'ElTable' }).exists()).toBe(true);
+    expect(
+      wrapper.find('.el-table').exists() || wrapper.findComponent({ name: 'ElTable' }).exists(),
+    ).toBe(true);
   });
 });

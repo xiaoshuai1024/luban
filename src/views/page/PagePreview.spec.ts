@@ -6,7 +6,9 @@ import ElementPlus from 'element-plus';
 import PagePreview from '@/views/page/PagePreview.vue';
 
 vi.mock('@/api/page', () => ({
-  previewPageDraft: vi.fn().mockResolvedValue({ data: { id: 'p1', schema: { root: { id: 'r', type: 'LubanHero', props: {} } } } }),
+  previewPageDraft: vi.fn().mockResolvedValue({
+    data: { id: 'p1', schema: { root: { id: 'r', type: 'LubanHero', props: {} } } },
+  }),
 }));
 
 const router = createRouter({

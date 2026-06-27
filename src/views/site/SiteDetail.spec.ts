@@ -4,7 +4,9 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 import ElementPlus from 'element-plus';
 import SiteDetail from './SiteDetail.vue';
 
-vi.mock('@/api/site', () => ({ getSite: vi.fn().mockResolvedValue({ data: { id: 's1', name: 'Test', slug: 'test' } }) }));
+vi.mock('@/api/site', () => ({
+  getSite: vi.fn().mockResolvedValue({ data: { id: 's1', name: 'Test', slug: 'test' } }),
+}));
 
 const router = createRouter({
   history: createMemoryHistory(),

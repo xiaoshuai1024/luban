@@ -70,7 +70,5 @@ export function getPageVersions(siteId: string, pageId: string) {
 }
 
 export function rollbackPage(siteId: string, pageId: string, versionId: string) {
-  return request.post<PageMeta>(
-    `/sites/${siteId}/pages/${pageId}/versions/${versionId}/rollback`,
-  );
+  return request.post<PageMeta>(`/sites/${siteId}/pages/${pageId}/versions/${versionId}/rollback`);
 }

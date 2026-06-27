@@ -6,11 +6,16 @@ import ElementPlus from 'element-plus';
 import UserList from '@/views/user/UserList.vue';
 
 vi.mock('@/api/user', () => ({
-  getUsers: vi.fn().mockResolvedValue({ data: { list: [
-    { id: 'u1', username: 'admin', name: 'Admin', role: 'admin', status: 'active' },
-    { id: 'u2', username: 'editor', name: 'Editor', role: 'editor', status: 'active' },
-    { id: 'u3', username: 'viewer', name: 'Viewer', role: 'viewer', status: 'disabled' },
-  ], total: 3 } }),
+  getUsers: vi.fn().mockResolvedValue({
+    data: {
+      list: [
+        { id: 'u1', username: 'admin', name: 'Admin', role: 'admin', status: 'active' },
+        { id: 'u2', username: 'editor', name: 'Editor', role: 'editor', status: 'active' },
+        { id: 'u3', username: 'viewer', name: 'Viewer', role: 'viewer', status: 'disabled' },
+      ],
+      total: 3,
+    },
+  }),
   createUser: vi.fn().mockResolvedValue({ data: { id: 'u4', username: 'new' } }),
   updateUser: vi.fn().mockResolvedValue({ data: {} }),
   setUserStatus: vi.fn().mockResolvedValue({ data: {} }),

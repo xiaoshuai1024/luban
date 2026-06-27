@@ -32,7 +32,11 @@ describe('site API', () => {
   it('createSite calls POST /sites', async () => {
     vi.mocked(request.post).mockResolvedValue({ data: { id: 'new' } });
     await createSite({ name: 'New', slug: 'new', baseUrl: 'https://new.com' });
-    expect(request.post).toHaveBeenCalledWith('/sites', { name: 'New', slug: 'new', baseUrl: 'https://new.com' });
+    expect(request.post).toHaveBeenCalledWith('/sites', {
+      name: 'New',
+      slug: 'new',
+      baseUrl: 'https://new.com',
+    });
   });
 
   it('updateSite calls PUT /sites/:id', async () => {

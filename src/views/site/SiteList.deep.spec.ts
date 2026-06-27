@@ -6,9 +6,9 @@ import ElementPlus from 'element-plus';
 import SiteList from '@/views/site/SiteList.vue';
 
 vi.mock('@/api/site', () => ({
-  getSites: vi.fn().mockResolvedValue({ data: [
-    { id: 's1', name: 'Site A', slug: 'a', baseUrl: 'https://a.com', status: 'active' },
-  ] }),
+  getSites: vi.fn().mockResolvedValue({
+    data: [{ id: 's1', name: 'Site A', slug: 'a', baseUrl: 'https://a.com', status: 'active' }],
+  }),
   createSite: vi.fn().mockResolvedValue({ data: { id: 's2', name: 'Created' } }),
   updateSite: vi.fn().mockResolvedValue({ data: { id: 's1' } }),
   deleteSite: vi.fn().mockResolvedValue({}),
@@ -39,7 +39,7 @@ describe('SiteList deep interactions', () => {
     const wrapper = mount(SiteList, { global: { plugins: [router, ElementPlus] } });
     await vi.waitFor(() => expect(wrapper.html()).toContain('Site A'));
     const row = wrapper.find('.el-table__row');
-    const detailBtn = row.findAll('button').find(b => b.text().includes('详情'));
+    const detailBtn = row.findAll('button').find((b) => b.text().includes('详情'));
     if (detailBtn) {
       await detailBtn.trigger('click');
       expect(wrapper.exists()).toBe(true);
@@ -50,7 +50,7 @@ describe('SiteList deep interactions', () => {
     const wrapper = mount(SiteList, { global: { plugins: [router, ElementPlus] } });
     await vi.waitFor(() => expect(wrapper.html()).toContain('Site A'));
     const row = wrapper.find('.el-table__row');
-    const pagesBtn = row.findAll('button').find(b => b.text().includes('页面'));
+    const pagesBtn = row.findAll('button').find((b) => b.text().includes('页面'));
     if (pagesBtn) {
       await pagesBtn.trigger('click');
       expect(wrapper.exists()).toBe(true);
@@ -61,11 +61,13 @@ describe('SiteList deep interactions', () => {
     const wrapper = mount(SiteList, { global: { plugins: [router, ElementPlus] } });
     await vi.waitFor(() => expect(wrapper.html()).toContain('Site A'));
     const row = wrapper.find('.el-table__row');
-    const editBtn = row.findAll('button').find(b => b.text().includes('编辑'));
+    const editBtn = row.findAll('button').find((b) => b.text().includes('编辑'));
     if (editBtn) {
       await editBtn.trigger('click');
       await vi.waitFor(() => {
-        expect(wrapper.find('.el-dialog').exists() || document.querySelector('.el-dialog')).toBeTruthy();
+        expect(
+          wrapper.find('.el-dialog').exists() || document.querySelector('.el-dialog'),
+        ).toBeTruthy();
       });
     }
   });
@@ -74,7 +76,7 @@ describe('SiteList deep interactions', () => {
     const wrapper = mount(SiteList, { global: { plugins: [router, ElementPlus] } });
     await vi.waitFor(() => expect(wrapper.html()).toContain('Site A'));
     const row = wrapper.find('.el-table__row');
-    const delBtn = row.findAll('button').find(b => b.text().includes('删除'));
+    const delBtn = row.findAll('button').find((b) => b.text().includes('删除'));
     if (delBtn) {
       await delBtn.trigger('click');
       await vi.waitFor(() => {

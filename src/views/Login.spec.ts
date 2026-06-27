@@ -62,7 +62,7 @@ describe('Login.vue', () => {
   });
 
   it('calls login API even with empty form (current behavior)', async () => {
-    vi.mocked(login).mockRejectedValue(new Error('invalid') as any);
+    vi.mocked(login).mockRejectedValue(new Error('invalid') as never);
     const wrapper = mountLogin();
     await wrapper.find('button').trigger('click');
     // 当前行为：空表单也会调 API（后端拒绝）
@@ -72,7 +72,9 @@ describe('Login.vue', () => {
   });
 
   it('calls login API when form is filled', async () => {
-    vi.mocked(login).mockResolvedValue({ data: { token: 'tok', user: { username: 'admin' } } } as any);
+    vi.mocked(login).mockResolvedValue({
+      data: { token: 'tok', user: { username: 'admin' } },
+    } as never);
     const wrapper = mountLogin();
     await wrapper.find('input[placeholder="请输入账号"]').setValue('admin');
     await wrapper.find('input[placeholder="请输入密码"]').setValue('pass');

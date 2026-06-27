@@ -6,7 +6,9 @@ import ElementPlus from 'element-plus';
 import Settings from '@/views/settings/Settings.vue';
 
 vi.mock('@/api/settings', () => ({
-  getSettings: vi.fn().mockResolvedValue({ data: { siteName: 'Luban', logo: '', features: { darkMode: false } } }),
+  getSettings: vi
+    .fn()
+    .mockResolvedValue({ data: { siteName: 'Luban', logo: '', features: { darkMode: false } } }),
   updateSettings: vi.fn().mockResolvedValue({ data: {} }),
 }));
 
@@ -29,8 +31,11 @@ describe('Settings deep interactions', () => {
 
   it('loads settings data', async () => {
     const wrapper = mount(Settings, { global: { plugins: [router, ElementPlus] } });
-    await vi.waitFor(() => {
-      expect(wrapper.html()).toBeTruthy();
-    }, { timeout: 5000 });
+    await vi.waitFor(
+      () => {
+        expect(wrapper.html()).toBeTruthy();
+      },
+      { timeout: 5000 },
+    );
   });
 });

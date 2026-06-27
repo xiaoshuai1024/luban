@@ -229,8 +229,13 @@ function handlePages(config: AxiosRequestConfig): AxiosResponse | null {
     const idx = mockContext.pages.findIndex(
       (p) => p.siteId === matchPublish[1] && p.id === matchPublish[2],
     );
-    if (idx === -1) return createResponse(config, { message: 'Page not found' } as Record<string, unknown>, 404);
-    mockContext.pages[idx] = { ...mockContext.pages[idx], status: 'published', updatedAt: formatDateTime() };
+    if (idx === -1)
+      return createResponse(config, { message: 'Page not found' } as Record<string, unknown>, 404);
+    mockContext.pages[idx] = {
+      ...mockContext.pages[idx],
+      status: 'published',
+      updatedAt: formatDateTime(),
+    };
     return createResponse(config, mockContext.pages[idx]);
   }
 
@@ -241,8 +246,13 @@ function handlePages(config: AxiosRequestConfig): AxiosResponse | null {
     const idx = mockContext.pages.findIndex(
       (p) => p.siteId === matchUnpublish[1] && p.id === matchUnpublish[2],
     );
-    if (idx === -1) return createResponse(config, { message: 'Page not found' } as Record<string, unknown>, 404);
-    mockContext.pages[idx] = { ...mockContext.pages[idx], status: 'archived', updatedAt: formatDateTime() };
+    if (idx === -1)
+      return createResponse(config, { message: 'Page not found' } as Record<string, unknown>, 404);
+    mockContext.pages[idx] = {
+      ...mockContext.pages[idx],
+      status: 'archived',
+      updatedAt: formatDateTime(),
+    };
     return createResponse(config, mockContext.pages[idx]);
   }
 
@@ -253,7 +263,8 @@ function handlePages(config: AxiosRequestConfig): AxiosResponse | null {
     const page = mockContext.pages.find(
       (p) => p.siteId === matchPreview[1] && p.id === matchPreview[2],
     );
-    if (!page) return createResponse(config, { message: 'Page not found' } as Record<string, unknown>, 404);
+    if (!page)
+      return createResponse(config, { message: 'Page not found' } as Record<string, unknown>, 404);
     return createResponse(config, { ...page, status: 'draft' });
   }
 
@@ -264,14 +275,17 @@ function handlePages(config: AxiosRequestConfig): AxiosResponse | null {
     return createResponse(config, [] as PageVersion[]);
   }
 
-  const matchRollback = url.match(/^\/sites\/([^/]+)\/pages\/([^/]+)\/versions\/([^/]+)\/rollback$/);
+  const matchRollback = url.match(
+    /^\/sites\/([^/]+)\/pages\/([^/]+)\/versions\/([^/]+)\/rollback$/,
+  );
   if (matchRollback && method === 'post') {
     const authError = requireAuth(config);
     if (authError) return authError;
     const page = mockContext.pages.find(
       (p) => p.siteId === matchRollback[1] && p.id === matchRollback[2],
     );
-    if (!page) return createResponse(config, { message: 'Not found' } as Record<string, unknown>, 404);
+    if (!page)
+      return createResponse(config, { message: 'Not found' } as Record<string, unknown>, 404);
     return createResponse(config, page);
   }
   // ---- 发布闭环 mock handlers END ----

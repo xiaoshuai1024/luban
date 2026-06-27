@@ -55,7 +55,9 @@ describe('Login.vue interactions', () => {
   });
 
   it('submit calls login with form values', async () => {
-    vi.mocked(login).mockResolvedValue({ data: { token: 'tok', user: { username: 'admin' } } } as any);
+    vi.mocked(login).mockResolvedValue({
+      data: { token: 'tok', user: { username: 'admin' } },
+    } as never);
     const wrapper = mountLogin();
     await wrapper.find('input[placeholder="请输入账号"]').setValue('admin');
     await wrapper.find('input[placeholder="请输入密码"]').setValue('pass123');
@@ -66,7 +68,7 @@ describe('Login.vue interactions', () => {
   });
 
   it('handles login failure', async () => {
-    vi.mocked(login).mockRejectedValue(new Error('Invalid credentials') as any);
+    vi.mocked(login).mockRejectedValue(new Error('Invalid credentials') as never);
     const wrapper = mountLogin();
     await wrapper.find('input[placeholder="请输入账号"]').setValue('bad');
     await wrapper.find('input[placeholder="请输入密码"]').setValue('bad');

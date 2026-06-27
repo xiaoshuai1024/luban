@@ -11,10 +11,7 @@ const loading = ref(false);
 onMounted(async () => {
   loading.value = true;
   try {
-    const [sitesRes, usersRes] = await Promise.all([
-      getSites(),
-      getUsers(),
-    ]);
+    const [sitesRes, usersRes] = await Promise.all([getSites(), getUsers()]);
     siteCount.value = Array.isArray(sitesRes.data) ? sitesRes.data.length : 0;
     userCount.value = usersRes.data?.total ?? 0;
   } catch {

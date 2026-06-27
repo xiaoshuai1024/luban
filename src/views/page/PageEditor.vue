@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, shallowRef, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElButton, ElInput, ElMessage } from 'element-plus'
-import { getPage, savePage, createPage } from '@/api/page'
-import type { PageSchema, NodeSchema } from '@/types/schema'
-import { useDesignerKeyboard } from '@/composables/useDesignerKeyboard'
+import { ref, computed, onMounted, watch, shallowRef, nextTick } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { ElButton, ElInput, ElMessage } from 'element-plus';
+import { getPage, savePage, createPage } from '@/api/page';
+import type { PageSchema, NodeSchema } from '@/types/schema';
+import { useDesignerKeyboard } from '@/composables/useDesignerKeyboard';
 
 /**
  * T-eng-1: PageEditor 重写为完整 IDE 三栏布局
@@ -21,153 +21,163 @@ import { useDesignerKeyboard } from '@/composables/useDesignerKeyboard'
  * 所有 luban-low-code 组件通过动态 import 加载（避免引擎硬依赖）。
  */
 
-type DeviceType = 'pc' | 'tablet' | 'mobile'
-type EditorMode = 'design' | 'preview' | 'code'
-type MenuAction = 'copy' | 'paste' | 'delete' | 'bring-front' | 'send-back' | 'move-up' | 'move-down'
+type DeviceType = 'pc' | 'tablet' | 'mobile';
+type EditorMode = 'design' | 'preview' | 'code';
+type MenuAction =
+  | 'copy'
+  | 'paste'
+  | 'delete'
+  | 'bring-front'
+  | 'send-back'
+  | 'move-up'
+  | 'move-down';
 
 // ===== 动态加载的 luban-low-code 模块 =====
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 interface LubanLowCodeModule {
-  LubanDesigner: any
-  DesignerToolbar: any
-  PropertyPanel: any
-  ComponentPanel: any
-  OutlineTree: any
-  ContextMenu: any
-  CodeEditor: any
+  LubanDesigner: unknown;
+  DesignerToolbar: unknown;
+  PropertyPanel: unknown;
+  ComponentPanel: unknown;
+  OutlineTree: unknown;
+  ContextMenu: unknown;
+  CodeEditor: unknown;
   useHistory: (initial: PageSchema) => {
-    current: { value: PageSchema }
-    push: (s: PageSchema) => void
-    undo: () => void
-    redo: () => void
-    canUndo: { value: boolean }
-    canRedo: { value: boolean }
-    reset: (s: PageSchema) => void
-  }
+    current: { value: PageSchema };
+    push: (s: PageSchema) => void;
+    undo: () => void;
+    redo: () => void;
+    canUndo: { value: boolean };
+    canRedo: { value: boolean };
+    reset: (s: PageSchema) => void;
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  getComponentMeta: (type: string) => any | undefined
-  findNode: (root: NodeSchema, id: string) => NodeSchema | null
-  findParent: (root: NodeSchema, childId: string) => NodeSchema | null
-  removeNode: (root: NodeSchema, id: string) => boolean
-  duplicateNode: (root: NodeSchema, id: string) => NodeSchema | null
-  moveNode: (root: NodeSchema, id: string, direction: 'up' | 'down') => boolean
-  insertNode: (root: NodeSchema, node: NodeSchema, parentId: string, index?: number) => boolean
-  updateNodeProps: (root: NodeSchema, id: string, patch: Record<string, unknown>) => boolean
-  bringToFront: (root: NodeSchema, id: string) => boolean
-  sendToBack: (root: NodeSchema, id: string) => boolean
-  genNodeId: (type: string) => string
+  getComponentMeta: (type: string) => any | undefined;
+  findNode: (root: NodeSchema, id: string) => NodeSchema | null;
+  findParent: (root: NodeSchema, childId: string) => NodeSchema | null;
+  removeNode: (root: NodeSchema, id: string) => boolean;
+  duplicateNode: (root: NodeSchema, id: string) => NodeSchema | null;
+  moveNode: (root: NodeSchema, id: string, direction: 'up' | 'down') => boolean;
+  insertNode: (root: NodeSchema, node: NodeSchema, parentId: string, index?: number) => boolean;
+  updateNodeProps: (root: NodeSchema, id: string, patch: Record<string, unknown>) => boolean;
+  bringToFront: (root: NodeSchema, id: string) => boolean;
+  sendToBack: (root: NodeSchema, id: string) => boolean;
+  genNodeId: (type: string) => string;
 }
 
-const route = useRoute()
-const router = useRouter()
-const siteId = computed(() => route.params.siteId as string)
-const pageId = computed(() => route.params.pageId as string)
-const isNew = computed(() => route.name === 'PageNew' || route.meta.isNew)
+const route = useRoute();
+const router = useRouter();
+const siteId = computed(() => route.params.siteId as string);
+const pageId = computed(() => route.params.pageId as string);
+const isNew = computed(() => route.name === 'PageNew' || route.meta.isNew);
 
 // ===== 页面元数据 =====
-const pageName = ref('')
-const pagePath = ref('')
-const loading = ref(false)
-const saving = ref(false)
-const designerError = ref<string | null>(null)
+const pageName = ref('');
+const pagePath = ref('');
+const loading = ref(false);
+const saving = ref(false);
+const designerError = ref<string | null>(null);
 
 // ===== 动态加载的组件引用 =====
-const LubanDesignerC = shallowRef<unknown>(null)
-const DesignerToolbarC = shallowRef<unknown>(null)
-const PropertyPanelC = shallowRef<unknown>(null)
-const ComponentPanelC = shallowRef<unknown>(null)
-const OutlineTreeC = shallowRef<unknown>(null)
-const ContextMenuC = shallowRef<unknown>(null)
-const CodeEditorC = shallowRef<unknown>(null)
+const LubanDesignerC = shallowRef<unknown>(null);
+const DesignerToolbarC = shallowRef<unknown>(null);
+const PropertyPanelC = shallowRef<unknown>(null);
+const ComponentPanelC = shallowRef<unknown>(null);
+const OutlineTreeC = shallowRef<unknown>(null);
+const ContextMenuC = shallowRef<unknown>(null);
+const CodeEditorC = shallowRef<unknown>(null);
 
 // ===== luban-low-code 工具函数（加载后赋值） =====
-const llc = shallowRef<LubanLowCodeModule | null>(null)
+const llc = shallowRef<LubanLowCodeModule | null>(null);
 
 // ===== 设计器状态 =====
-const schema = ref<PageSchema | null>(null)
-const selectedNodeId = ref<string | null>(null)
-const designMode = ref(true) // 🔑 关键修复：设计模式默认开启
-const editorMode = ref<EditorMode>('design') // design / preview / code
-const device = ref<DeviceType>('pc')
-const leftPanelCollapsed = ref(false)
-const rightPanelCollapsed = ref(false)
+const schema = ref<PageSchema | null>(null);
+const selectedNodeId = ref<string | null>(null);
+const designMode = ref(true); // 🔑 关键修复：设计模式默认开启
+const editorMode = ref<EditorMode>('design'); // design / preview / code
+const device = ref<DeviceType>('pc');
+const leftPanelCollapsed = ref(false);
+const rightPanelCollapsed = ref(false);
 
 // ===== 历史栈（useHistory 加载后赋值） =====
-const history = ref<ReturnType<LubanLowCodeModule['useHistory']> | null>(null)
-const canUndo = computed(() => history.value?.canUndo.value ?? false)
-const canRedo = computed(() => history.value?.canRedo.value ?? false)
+const history = ref<ReturnType<LubanLowCodeModule['useHistory']> | null>(null);
+const canUndo = computed(() => history.value?.canUndo.value ?? false);
+const canRedo = computed(() => history.value?.canRedo.value ?? false);
 
 // ===== 右键菜单状态 =====
-const contextMenuVisible = ref(false)
-const contextMenuX = ref(0)
-const contextMenuY = ref(0)
-const contextMenuNodeId = ref<string | null>(null)
+const contextMenuVisible = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+const contextMenuNodeId = ref<string | null>(null);
 
 // ===== 剪贴板（用于 copy/paste） =====
-const clipboard = shallowRef<NodeSchema | null>(null)
+const clipboard = shallowRef<NodeSchema | null>(null);
 
 // ===== 当前选中的节点元数据（给 PropertyPanel） =====
 const selectedNodeMeta = computed(() => {
-  if (!schema.value || !selectedNodeId.value || !llc.value) return null
-  const node = llc.value.findNode(schema.value.root, selectedNodeId.value)
-  if (!node) return null
-  return llc.value.getComponentMeta(node.type) ?? null
-})
+  if (!schema.value || !selectedNodeId.value || !llc.value) return null;
+  const node = llc.value.findNode(schema.value.root, selectedNodeId.value);
+  if (!node) return null;
+  return llc.value.getComponentMeta(node.type) ?? null;
+});
 
 const selectedNodeProps = computed(() => {
-  if (!schema.value || !selectedNodeId.value) return {}
-  const node = llc.value?.findNode(schema.value.root, selectedNodeId.value)
-  return node?.props ?? {}
-})
+  if (!schema.value || !selectedNodeId.value) return {};
+  const node = llc.value?.findNode(schema.value.root, selectedNodeId.value);
+  return node?.props ?? {};
+});
 
 const selectedNodeStyle = computed(() => {
-  if (!schema.value || !selectedNodeId.value) return {}
-  const node = llc.value?.findNode(schema.value.root, selectedNodeId.value)
-  return (node?.style as Record<string, unknown>) ?? {}
-})
+  if (!schema.value || !selectedNodeId.value) return {};
+  const node = llc.value?.findNode(schema.value.root, selectedNodeId.value);
+  return (node?.style as Record<string, unknown>) ?? {};
+});
 
 // ===== 断点映射（device → breakpoint） =====
 const breakpoint = computed(() => {
-  if (device.value === 'mobile') return 'mobile' as const
-  if (device.value === 'tablet') return 'tablet' as const
-  return 'desktop' as const
-})
+  if (device.value === 'mobile') return 'mobile' as const;
+  if (device.value === 'tablet') return 'tablet' as const;
+  return 'desktop' as const;
+});
 
 // ===== 画布宽度（设备预览） =====
 const canvasWidth = computed(() => {
-  if (device.value === 'mobile') return '375px'
-  if (device.value === 'tablet') return '768px'
-  return '100%'
-})
+  if (device.value === 'mobile') return '375px';
+  if (device.value === 'tablet') return '768px';
+  return '100%';
+});
 
 // ===== 加载 luban-low-code 模块 =====
 onMounted(async () => {
   try {
-    const m = (await import(/* @vite-ignore */ 'luban-low-code')) as unknown as LubanLowCodeModule
-    llc.value = m
-    LubanDesignerC.value = m.LubanDesigner
-    DesignerToolbarC.value = m.DesignerToolbar
-    PropertyPanelC.value = m.PropertyPanel
-    ComponentPanelC.value = m.ComponentPanel
-    OutlineTreeC.value = m.OutlineTree
-    ContextMenuC.value = m.ContextMenu
-    CodeEditorC.value = m.CodeEditor
+    const m = (await import(/* @vite-ignore */ 'luban-low-code')) as unknown as LubanLowCodeModule;
+    llc.value = m;
+    LubanDesignerC.value = m.LubanDesigner;
+    DesignerToolbarC.value = m.DesignerToolbar;
+    PropertyPanelC.value = m.PropertyPanel;
+    ComponentPanelC.value = m.ComponentPanel;
+    OutlineTreeC.value = m.OutlineTree;
+    ContextMenuC.value = m.ContextMenu;
+    CodeEditorC.value = m.CodeEditor;
 
     // 初始化历史栈（schema 加载后）
     if (schema.value) {
-      history.value = m.useHistory(schema.value)
+      history.value = m.useHistory(schema.value);
     }
   } catch {
-    designerError.value = '未安装 luban-low-code，无法使用页面设计器。'
+    designerError.value = '未安装 luban-low-code，无法使用页面设计器。';
   }
-})
+});
 
 // schema 加载后初始化历史栈
-watch(schema, (val) => {
-  if (val && llc.value && !history.value) {
-    history.value = llc.value.useHistory(val)
-  }
-}, { immediate: false })
+watch(
+  schema,
+  (val) => {
+    if (val && llc.value && !history.value) {
+      history.value = llc.value.useHistory(val);
+    }
+  },
+  { immediate: false },
+);
 
 // ===== 注册全局快捷键 =====
 useDesignerKeyboard({
@@ -181,176 +191,180 @@ useDesignerKeyboard({
   onDuplicate: () => duplicateSelected(),
   onSave: () => handleSave(),
   onEsc: () => {
-    selectedNodeId.value = null
-    contextMenuVisible.value = false
+    selectedNodeId.value = null;
+    contextMenuVisible.value = false;
   },
-})
+});
 
 // ===== 页面加载 =====
 async function loadPage() {
-  if (!siteId.value || (isNew.value ? false : !pageId.value)) return
-  loading.value = true
+  if (!siteId.value || (isNew.value ? false : !pageId.value)) return;
+  loading.value = true;
   try {
     if (isNew.value) {
-      pageName.value = ''
-      pagePath.value = ''
+      pageName.value = '';
+      pagePath.value = '';
       schema.value = {
         root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
-      }
+      };
     } else {
-      const { data } = await getPage(siteId.value, pageId.value)
-      pageName.value = data.name
-      pagePath.value = data.path
+      const { data } = await getPage(siteId.value, pageId.value);
+      pageName.value = data.name;
+      pagePath.value = data.path;
       schema.value = data.schema ?? {
         root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
-      }
+      };
     }
   } catch {
-    schema.value = { root: { id: 'root', type: 'LubanContainer', props: {}, children: [] } }
+    schema.value = { root: { id: 'root', type: 'LubanContainer', props: {}, children: [] } };
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 // ===== schema 变更 → 同步到 history（debounce 500ms，避免连续 @input 过多快照）=====
-let historyTimer: ReturnType<typeof setTimeout> | null = null
+let historyTimer: ReturnType<typeof setTimeout> | null = null;
 function onSchemaUpdate(newSchema: PageSchema | null) {
-  if (!newSchema) return
-  schema.value = newSchema
+  if (!newSchema) return;
+  schema.value = newSchema;
   // 推入历史栈（undo/redo 时跳过，避免循环；debounce 避免连续输入过多快照）
   if (history.value && !isUndoRedoing.value) {
-    if (historyTimer) clearTimeout(historyTimer)
+    if (historyTimer) clearTimeout(historyTimer);
     historyTimer = setTimeout(() => {
-      history.value!.push(JSON.parse(JSON.stringify(schema.value)))
-      historyTimer = null
-    }, 500)
+      history.value!.push(JSON.parse(JSON.stringify(schema.value)));
+      historyTimer = null;
+    }, 500);
   }
 }
 
 // ===== 选中节点 =====
 function onSelectNode(nodeId: string | null) {
-  selectedNodeId.value = nodeId
+  selectedNodeId.value = nodeId;
 }
 
 // ===== 从组件库添加节点 =====
 function onAddNode(type: string, parentId?: string) {
-  if (!schema.value || !llc.value) return
-  const meta = llc.value.getComponentMeta(type)
+  if (!schema.value || !llc.value) return;
+  const meta = llc.value.getComponentMeta(type);
   const newNode: NodeSchema = {
     id: llc.value.genNodeId(type),
     type,
     props: meta?.defaultProps ? JSON.parse(JSON.stringify(meta.defaultProps)) : {},
     children: [],
-  }
-  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-  const targetParentId = parentId ?? 'root'
-  llc.value.insertNode(root, newNode, targetParentId)
-  const newSchema = { ...schema.value, root }
-  onSchemaUpdate(newSchema)
+  };
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  const targetParentId = parentId ?? 'root';
+  llc.value.insertNode(root, newNode, targetParentId);
+  const newSchema = { ...schema.value, root };
+  onSchemaUpdate(newSchema);
   // 自动选中新节点
-  selectedNodeId.value = newNode.id
+  selectedNodeId.value = newNode.id;
 }
 
 // ===== 属性面板 patch 回写 =====
 function onPropUpdate(patch: Record<string, unknown>) {
-  if (!schema.value || !selectedNodeId.value || !llc.value) return
-  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-  llc.value.updateNodeProps(root, selectedNodeId.value, patch)
-  onSchemaUpdate({ ...schema.value, root })
+  if (!schema.value || !selectedNodeId.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  llc.value.updateNodeProps(root, selectedNodeId.value, patch);
+  onSchemaUpdate({ ...schema.value, root });
 }
 
 function onStyleUpdate(patch: Record<string, unknown>) {
-  if (!schema.value || !selectedNodeId.value || !llc.value) return
-  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-  const node = llc.value.findNode(root, selectedNodeId.value)
+  if (!schema.value || !selectedNodeId.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  const node = llc.value.findNode(root, selectedNodeId.value);
   if (node) {
-    node.style = { ...(node.style ?? {}), ...patch }
+    node.style = { ...(node.style ?? {}), ...patch };
   }
-  onSchemaUpdate({ ...schema.value, root })
+  onSchemaUpdate({ ...schema.value, root });
 }
 
 // ===== 撤销/重做 =====
-const isUndoRedoing = ref(false)
+const isUndoRedoing = ref(false);
 
 function doUndo() {
-  if (!history.value) return
-  history.value.undo()
+  if (!history.value) return;
+  history.value.undo();
   if (history.value.current.value) {
-    isUndoRedoing.value = true
-    schema.value = JSON.parse(JSON.stringify(history.value.current.value))
-    nextTick(() => { isUndoRedoing.value = false })
+    isUndoRedoing.value = true;
+    schema.value = JSON.parse(JSON.stringify(history.value.current.value));
+    nextTick(() => {
+      isUndoRedoing.value = false;
+    });
   }
 }
 
 function doRedo() {
-  if (!history.value) return
-  history.value.redo()
+  if (!history.value) return;
+  history.value.redo();
   if (history.value.current.value) {
-    isUndoRedoing.value = true
-    schema.value = JSON.parse(JSON.stringify(history.value.current.value))
-    nextTick(() => { isUndoRedoing.value = false })
+    isUndoRedoing.value = true;
+    schema.value = JSON.parse(JSON.stringify(history.value.current.value));
+    nextTick(() => {
+      isUndoRedoing.value = false;
+    });
   }
 }
 
 // ===== 复制/粘贴/克隆/删除 =====
 function copySelected() {
-  if (!schema.value || !selectedNodeId.value || !llc.value) return
-  const node = llc.value.findNode(schema.value.root, selectedNodeId.value)
+  if (!schema.value || !selectedNodeId.value || !llc.value) return;
+  const node = llc.value.findNode(schema.value.root, selectedNodeId.value);
   if (node) {
-    clipboard.value = JSON.parse(JSON.stringify(node))
+    clipboard.value = JSON.parse(JSON.stringify(node));
   }
 }
 
 function pasteNode() {
-  if (!schema.value || !clipboard.value || !llc.value) return
-  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-  const newNode = JSON.parse(JSON.stringify(clipboard.value)) as NodeSchema
-  newNode.id = llc.value.genNodeId(newNode.type)
-  llc.value.insertNode(root, newNode, 'root')
-  onSchemaUpdate({ ...schema.value, root })
-  selectedNodeId.value = newNode.id
+  if (!schema.value || !clipboard.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  const newNode = JSON.parse(JSON.stringify(clipboard.value)) as NodeSchema;
+  newNode.id = llc.value.genNodeId(newNode.type);
+  llc.value.insertNode(root, newNode, 'root');
+  onSchemaUpdate({ ...schema.value, root });
+  selectedNodeId.value = newNode.id;
 }
 
 function duplicateSelected() {
-  if (!schema.value || !selectedNodeId.value || !llc.value) return
-  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-  const cloned = llc.value.duplicateNode(root, selectedNodeId.value)
+  if (!schema.value || !selectedNodeId.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  const cloned = llc.value.duplicateNode(root, selectedNodeId.value);
   if (cloned) {
-    onSchemaUpdate({ ...schema.value, root })
-    selectedNodeId.value = cloned.id
+    onSchemaUpdate({ ...schema.value, root });
+    selectedNodeId.value = cloned.id;
   }
 }
 
 function deleteSelected() {
-  if (!schema.value || !selectedNodeId.value || !llc.value) return
-  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-  llc.value.removeNode(root, selectedNodeId.value)
-  onSchemaUpdate({ ...schema.value, root })
-  selectedNodeId.value = null
+  if (!schema.value || !selectedNodeId.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  llc.value.removeNode(root, selectedNodeId.value);
+  onSchemaUpdate({ ...schema.value, root });
+  selectedNodeId.value = null;
 }
 
 function deleteNode(nodeId: string) {
-  if (!schema.value || !llc.value) return
-  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-  llc.value.removeNode(root, nodeId)
-  onSchemaUpdate({ ...schema.value, root })
-  if (selectedNodeId.value === nodeId) selectedNodeId.value = null
+  if (!schema.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  llc.value.removeNode(root, nodeId);
+  onSchemaUpdate({ ...schema.value, root });
+  if (selectedNodeId.value === nodeId) selectedNodeId.value = null;
 }
 
 function duplicateNode(nodeId: string) {
-  if (!schema.value || !llc.value) return
-  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-  const cloned = llc.value.duplicateNode(root, nodeId)
+  if (!schema.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  const cloned = llc.value.duplicateNode(root, nodeId);
   if (cloned) {
-    onSchemaUpdate({ ...schema.value, root })
+    onSchemaUpdate({ ...schema.value, root });
   }
 }
 
 function moveNodeReorder(nodeId: string, direction: 'up' | 'down') {
-  if (!schema.value || !llc.value) return
-  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-  llc.value.moveNode(root, nodeId, direction)
-  onSchemaUpdate({ ...schema.value, root })
+  if (!schema.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  llc.value.moveNode(root, nodeId, direction);
+  onSchemaUpdate({ ...schema.value, root });
 }
 
 // ===== 跨容器移动节点 =====
@@ -358,137 +372,145 @@ function onMoveNode(
   nodeId: string,
   _fromParentId: string | null,
   toParentId: string | null,
-  toIndex: number
+  toIndex: number,
 ) {
-  if (!schema.value || !llc.value) return
-  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-  const node = llc.value.findNode(root, nodeId)
-  if (!node) return
+  if (!schema.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  const node = llc.value.findNode(root, nodeId);
+  if (!node) return;
   // 先从原位置移除
-  llc.value.removeNode(root, nodeId)
+  llc.value.removeNode(root, nodeId);
   // 插入到目标父节点
-  const targetParent = toParentId ? llc.value.findNode(root, toParentId) : root
+  const targetParent = toParentId ? llc.value.findNode(root, toParentId) : root;
   if (targetParent) {
-    if (!targetParent.children) targetParent.children = []
-    targetParent.children.splice(toIndex, 0, JSON.parse(JSON.stringify(node)))
+    if (!targetParent.children) targetParent.children = [];
+    targetParent.children.splice(toIndex, 0, JSON.parse(JSON.stringify(node)));
   }
-  onSchemaUpdate({ ...schema.value, root })
+  onSchemaUpdate({ ...schema.value, root });
 }
 
 // ===== root 级重排 =====
 function onReorder(fromIndex: number, toIndex: number) {
-  if (!schema.value) return
-  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-  if (!root.children) return
-  const [moved] = root.children.splice(fromIndex, 1)
-  root.children.splice(toIndex, 0, moved)
-  onSchemaUpdate({ ...schema.value, root })
+  if (!schema.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  if (!root.children) return;
+  const [moved] = root.children.splice(fromIndex, 1);
+  root.children.splice(toIndex, 0, moved);
+  onSchemaUpdate({ ...schema.value, root });
 }
 
 // ===== 右键菜单 =====
 function onContextMenu(x: number, y: number, nodeId: string) {
-  contextMenuX.value = x
-  contextMenuY.value = y
-  contextMenuNodeId.value = nodeId
-  selectedNodeId.value = nodeId
-  contextMenuVisible.value = true
+  contextMenuX.value = x;
+  contextMenuY.value = y;
+  contextMenuNodeId.value = nodeId;
+  selectedNodeId.value = nodeId;
+  contextMenuVisible.value = true;
 }
 
 function onContextMenuAction(action: MenuAction) {
-  contextMenuVisible.value = false
-  const nodeId = contextMenuNodeId.value
-  if (!nodeId) return
+  contextMenuVisible.value = false;
+  const nodeId = contextMenuNodeId.value;
+  if (!nodeId) return;
   switch (action) {
     case 'copy':
-      copySelected()
-      break
+      copySelected();
+      break;
     case 'paste':
-      pasteNode()
-      break
+      pasteNode();
+      break;
     case 'delete':
-      deleteNode(nodeId)
-      break
+      deleteNode(nodeId);
+      break;
     case 'bring-front':
       if (schema.value && llc.value) {
-        const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-        llc.value.bringToFront(root, nodeId)
-        onSchemaUpdate({ ...schema.value!, root })
+        const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+        llc.value.bringToFront(root, nodeId);
+        onSchemaUpdate({ ...schema.value!, root });
       }
-      break
+      break;
     case 'send-back':
       if (schema.value && llc.value) {
-        const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema
-        llc.value.sendToBack(root, nodeId)
-        onSchemaUpdate({ ...schema.value!, root })
+        const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+        llc.value.sendToBack(root, nodeId);
+        onSchemaUpdate({ ...schema.value!, root });
       }
-      break
+      break;
     case 'move-up':
-      moveNodeReorder(nodeId, 'up')
-      break
+      moveNodeReorder(nodeId, 'up');
+      break;
     case 'move-down':
-      moveNodeReorder(nodeId, 'down')
-      break
+      moveNodeReorder(nodeId, 'down');
+      break;
   }
 }
 
 // ===== 工具栏事件 =====
-function onToolbarUndo() { doUndo() }
-function onToolbarRedo() { doRedo() }
-function onToolbarDevice(d: DeviceType) { device.value = d }
-function onToolbarMode(m: EditorMode) {
-  editorMode.value = m
-  // 预览模式关闭 designMode
-  designMode.value = m === 'design'
+function onToolbarUndo() {
+  doUndo();
 }
-function onToolbarSave() { handleSave() }
+function onToolbarRedo() {
+  doRedo();
+}
+function onToolbarDevice(d: DeviceType) {
+  device.value = d;
+}
+function onToolbarMode(m: EditorMode) {
+  editorMode.value = m;
+  // 预览模式关闭 designMode
+  designMode.value = m === 'design';
+}
+function onToolbarSave() {
+  handleSave();
+}
 
 // ===== CodeEditor 双向绑定 =====
 function onCodeUpdate(newSchema: PageSchema) {
-  onSchemaUpdate(newSchema)
+  onSchemaUpdate(newSchema);
 }
 
 // ===== 保存 =====
 async function handleSave() {
-  if (!schema.value || !siteId.value) return
+  if (!schema.value || !siteId.value) return;
   if (!pageName.value || !pagePath.value) {
-    ElMessage.warning('请填写页面名称和路径')
-    return
+    ElMessage.warning('请填写页面名称和路径');
+    return;
   }
-  saving.value = true
+  saving.value = true;
   try {
     if (isNew.value) {
       const { data } = await createPage(siteId.value, {
         name: pageName.value,
         path: pagePath.value,
         schema: schema.value,
-      })
-      ElMessage.success('创建成功')
-      router.replace(`/sites/${siteId.value}/pages/${data.id}`)
+      });
+      ElMessage.success('创建成功');
+      router.replace(`/sites/${siteId.value}/pages/${data.id}`);
     } else {
       await savePage(siteId.value, pageId.value, {
         name: pageName.value,
         path: pagePath.value,
         schema: schema.value,
-      })
-      ElMessage.success('保存成功')
+      });
+      ElMessage.success('保存成功');
     }
   } catch (e) {
-    ElMessage.error((e as Error).message || '保存失败')
+    ElMessage.error((e as Error).message || '保存失败');
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 
 function goBack() {
-  router.push(`/sites/${siteId.value}/pages`)
+  router.push(`/sites/${siteId.value}/pages`);
 }
 
-onMounted(loadPage)
-watch([siteId, pageId], loadPage)
+onMounted(loadPage);
+watch([siteId, pageId], loadPage);
 </script>
 
 <template>
-  <div class="page-editor" v-loading="loading">
+  <div v-loading="loading" class="page-editor">
     <!-- 加载错误 -->
     <div v-if="designerError" class="page-editor__error-banner">
       <p>{{ designerError }}</p>
@@ -507,7 +529,7 @@ watch([siteId, pageId], loadPage)
         </div>
 
         <!-- 中间：DesignerToolbar（撤销/重做/设备/模式） -->
-        <div class="page-editor__toolbar" v-if="DesignerToolbarC">
+        <div v-if="DesignerToolbarC" class="page-editor__toolbar">
           <component
             :is="DesignerToolbarC"
             :can-undo="canUndo"
@@ -538,8 +560,8 @@ watch([siteId, pageId], loadPage)
         >
           <button
             class="page-editor__collapse-btn"
-            @click="leftPanelCollapsed = !leftPanelCollapsed"
             :title="leftPanelCollapsed ? '展开组件库' : '收起组件库'"
+            @click="leftPanelCollapsed = !leftPanelCollapsed"
           >
             {{ leftPanelCollapsed ? '▶' : '◀' }}
           </button>
@@ -553,8 +575,8 @@ watch([siteId, pageId], loadPage)
           <div class="page-editor__canvas-wrapper" :style="{ maxWidth: canvasWidth }">
             <!-- 设计/预览模式：LubanDesigner -->
             <component
-              v-if="LubanDesignerC && editorMode !== 'code'"
               :is="LubanDesignerC"
+              v-if="LubanDesignerC && editorMode !== 'code'"
               v-model:schema="schema"
               v-model:selected-node-id="selectedNodeId"
               :design-mode="designMode"
@@ -563,18 +585,26 @@ watch([siteId, pageId], loadPage)
               placeholder="从左侧拖拽组件到此处"
               @add-node="(type: string, parentId?: string) => onAddNode(type, parentId)"
               @select="(id: string | null) => onSelectNode(id)"
-              @copy="(id: string) => { selectedNodeId = id; copySelected() }"
+              @copy="
+                (id: string) => {
+                  selectedNodeId = id;
+                  copySelected();
+                }
+              "
               @delete="(id: string) => deleteNode(id)"
               @reorder="(from: number, to: number) => onReorder(from, to)"
-              @move-node="(id: string, from: string | null, to: string | null, idx: number) => onMoveNode(id, from, to, idx)"
+              @move-node="
+                (id: string, from: string | null, to: string | null, idx: number) =>
+                  onMoveNode(id, from, to, idx)
+              "
               @context-menu="(x: number, y: number, id: string) => onContextMenu(x, y, id)"
             />
             <!-- 代码模式：CodeEditor -->
             <component
-              v-else-if="CodeEditorC && editorMode === 'code'"
               :is="CodeEditorC"
+              v-else-if="CodeEditorC && editorMode === 'code'"
               :model-value="schema"
-              @update:modelValue="(val: PageSchema) => onCodeUpdate(val)"
+              @update:model-value="(val: PageSchema) => onCodeUpdate(val)"
             />
           </div>
         </main>
@@ -586,25 +616,25 @@ watch([siteId, pageId], loadPage)
         >
           <button
             class="page-editor__collapse-btn"
-            @click="rightPanelCollapsed = !rightPanelCollapsed"
             :title="rightPanelCollapsed ? '展开属性面板' : '收起属性面板'"
+            @click="rightPanelCollapsed = !rightPanelCollapsed"
           >
             {{ rightPanelCollapsed ? '◀' : '▶' }}
           </button>
           <div v-if="!rightPanelCollapsed" class="page-editor__right-content">
             <!-- 属性面板（上半） -->
-            <div class="page-editor__property-panel" v-if="PropertyPanelC">
+            <div v-if="PropertyPanelC" class="page-editor__property-panel">
               <component
                 :is="PropertyPanelC"
                 :node-meta="selectedNodeMeta"
                 :model-value="selectedNodeProps"
                 :style-value="selectedNodeStyle"
-                @update:modelValue="(patch: Record<string, unknown>) => onPropUpdate(patch)"
-                @update:styleValue="(patch: Record<string, unknown>) => onStyleUpdate(patch)"
+                @update:model-value="(patch: Record<string, unknown>) => onPropUpdate(patch)"
+                @update:style-value="(patch: Record<string, unknown>) => onStyleUpdate(patch)"
               />
             </div>
             <!-- 大纲树（下半） -->
-            <div class="page-editor__outline-tree" v-if="OutlineTreeC">
+            <div v-if="OutlineTreeC" class="page-editor__outline-tree">
               <div class="page-editor__panel-title">大纲</div>
               <component
                 :is="OutlineTreeC"
@@ -622,8 +652,8 @@ watch([siteId, pageId], loadPage)
 
       <!-- ===== 右键菜单 ===== -->
       <component
-        v-if="ContextMenuC"
         :is="ContextMenuC"
+        v-if="ContextMenuC"
         :visible="contextMenuVisible"
         :x="contextMenuX"
         :y="contextMenuY"
@@ -749,7 +779,7 @@ watch([siteId, pageId], loadPage)
   width: 100%;
   background: #fff;
   border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 8%);
   min-height: 600px;
   margin: 0 auto;
   transition: max-width 0.3s ease;

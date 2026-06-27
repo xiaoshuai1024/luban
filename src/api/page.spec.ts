@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getPages, getPage, createPage, savePage, deletePage, publishPage, unpublishPage, previewPageDraft, getPageVersions, rollbackPage } from './page';
+import {
+  getPages,
+  getPage,
+  createPage,
+  savePage,
+  deletePage,
+  publishPage,
+  unpublishPage,
+  previewPageDraft,
+  getPageVersions,
+  rollbackPage,
+} from './page';
 import { request } from './request';
 
 vi.mock('./request', () => ({
@@ -32,7 +43,10 @@ describe('page API', () => {
   it('createPage calls POST with name/path/schema', async () => {
     vi.mocked(request.post).mockResolvedValue({ data: { id: 'new' } });
     await createPage('site-1', { name: 'Test', path: '/test' });
-    expect(request.post).toHaveBeenCalledWith('/sites/site-1/pages', { name: 'Test', path: '/test' });
+    expect(request.post).toHaveBeenCalledWith('/sites/site-1/pages', {
+      name: 'Test',
+      path: '/test',
+    });
   });
 
   it('savePage calls PUT', async () => {

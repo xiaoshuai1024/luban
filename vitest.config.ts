@@ -35,7 +35,9 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
       // 测试环境 mock luban-low-code（实际包通过 link 安装但 vitest 解析不了）
-      'luban-low-code': fileURLToPath(new URL('./src/__mocks__/luban-low-code.ts', import.meta.url)),
+      'luban-low-code': fileURLToPath(
+        new URL('./src/__mocks__/luban-low-code.ts', import.meta.url),
+      ),
     },
   },
 });

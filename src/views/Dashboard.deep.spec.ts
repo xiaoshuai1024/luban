@@ -5,10 +5,16 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 import ElementPlus from 'element-plus';
 import Dashboard from '@/views/Dashboard.vue';
 
-vi.mock('@/api/site', () => ({ getSites: vi.fn().mockResolvedValue({ data: [{ id: 's1', name: 'Test' }] }) }));
-vi.mock('@/api/user', () => ({ getUsers: vi.fn().mockResolvedValue({ data: { list: [], total: 5 } }) }));
+vi.mock('@/api/site', () => ({
+  getSites: vi.fn().mockResolvedValue({ data: [{ id: 's1', name: 'Test' }] }),
+}));
+vi.mock('@/api/user', () => ({
+  getUsers: vi.fn().mockResolvedValue({ data: { list: [], total: 5 } }),
+}));
 vi.mock('@/api/request', () => ({
-  getToken: vi.fn(() => 'tok'), setToken: vi.fn(), clearToken: vi.fn(),
+  getToken: vi.fn(() => 'tok'),
+  setToken: vi.fn(),
+  clearToken: vi.fn(),
 }));
 
 const router = createRouter({

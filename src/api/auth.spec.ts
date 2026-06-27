@@ -21,7 +21,10 @@ describe('auth API', () => {
   it('login calls POST /auth/login', async () => {
     vi.mocked(request.post).mockResolvedValue({ data: { user: { username: 'admin' } } });
     await login({ username: 'admin', password: 'pass' });
-    expect(request.post).toHaveBeenCalledWith('/auth/login', { username: 'admin', password: 'pass' });
+    expect(request.post).toHaveBeenCalledWith('/auth/login', {
+      username: 'admin',
+      password: 'pass',
+    });
   });
 
   it('getCurrentUser calls GET /auth/me', async () => {

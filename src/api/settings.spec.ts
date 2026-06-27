@@ -4,7 +4,9 @@ import { request } from './request';
 
 vi.mock('./request', () => ({
   request: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
-  getToken: vi.fn(() => null), setToken: vi.fn(), clearToken: vi.fn(),
+  getToken: vi.fn(() => null),
+  setToken: vi.fn(),
+  clearToken: vi.fn(),
 }));
 
 describe('settings API', () => {

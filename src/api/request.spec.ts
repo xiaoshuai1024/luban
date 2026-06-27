@@ -3,15 +3,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockStorage: Record<string, string> = {};
 vi.stubGlobal('localStorage', {
   getItem: vi.fn((k: string) => mockStorage[k] ?? null),
-  setItem: vi.fn((k: string, v: string) => { mockStorage[k] = v; }),
-  removeItem: vi.fn((k: string) => { delete mockStorage[k]; }),
+  setItem: vi.fn((k: string, v: string) => {
+    mockStorage[k] = v;
+  }),
+  removeItem: vi.fn((k: string) => {
+    delete mockStorage[k];
+  }),
 });
 
 const { getToken, setToken, clearToken, request } = await import('./request');
 
 describe('request token helpers', () => {
   beforeEach(() => {
-    Object.keys(mockStorage).forEach(k => delete mockStorage[k]);
+    Object.keys(mockStorage).forEach((k) => delete mockStorage[k]);
   });
 
   it('getToken returns null when empty', () => {

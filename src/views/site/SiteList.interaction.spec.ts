@@ -1,15 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mount, shallowMount } from '@vue/test-utils';
+import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import ElementPlus from 'element-plus';
 import SiteList from '@/views/site/SiteList.vue';
 
 vi.mock('@/api/site', () => ({
-  getSites: vi.fn().mockResolvedValue({ data: [
-    { id: 's1', name: 'Site A', slug: 'a', baseUrl: 'https://a.com', status: 'active' },
-    { id: 's2', name: 'Site B', slug: 'b', baseUrl: 'https://b.com', status: 'inactive' },
-  ] }),
+  getSites: vi.fn().mockResolvedValue({
+    data: [
+      { id: 's1', name: 'Site A', slug: 'a', baseUrl: 'https://a.com', status: 'active' },
+      { id: 's2', name: 'Site B', slug: 'b', baseUrl: 'https://b.com', status: 'inactive' },
+    ],
+  }),
   createSite: vi.fn().mockResolvedValue({ data: { id: 's3', name: 'New' } }),
   updateSite: vi.fn().mockResolvedValue({ data: { id: 's1', name: 'Updated' } }),
   deleteSite: vi.fn().mockResolvedValue({}),
@@ -38,10 +40,12 @@ describe('SiteList.vue interactions', () => {
     const wrapper = mount(SiteList, { global: { plugins: [router, ElementPlus] } });
     await vi.waitFor(() => expect(wrapper.html()).toContain('新建站点'));
     const buttons = wrapper.findAll('button');
-    const createBtn = buttons.find(b => b.text().includes('新建站点'));
+    const createBtn = buttons.find((b) => b.text().includes('新建站点'));
     if (createBtn) await createBtn.trigger('click');
     await vi.waitFor(() => {
-      expect(document.querySelector('.el-dialog') || wrapper.find('.el-dialog').exists()).toBeTruthy();
+      expect(
+        document.querySelector('.el-dialog') || wrapper.find('.el-dialog').exists(),
+      ).toBeTruthy();
     });
   });
 

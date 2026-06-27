@@ -5,6 +5,7 @@ import { ElButton, ElTable, ElTableColumn, ElMessage, ElMessageBox, ElTag } from
 import { getPages, deletePage, publishPage, unpublishPage, type PageMeta } from '@/api/page';
 import { getSite } from '@/api/site';
 import { buildPublishedPagePreviewUrl } from '@/utils/publicPage';
+import VersionHistoryDrawer from './VersionHistoryDrawer.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -81,11 +82,11 @@ async function handlePublish(row: PageMeta) {
 
 async function handleUnpublish(row: PageMeta) {
   try {
-    await ElMessageBox.confirm(
-      `确定下线页面「${row.name}」？下线后访客将无法访问。`,
-      '下线确认',
-      { type: 'warning', confirmButtonText: '确认下线', cancelButtonText: '取消' },
-    );
+    await ElMessageBox.confirm(`确定下线页面「${row.name}」？下线后访客将无法访问。`, '下线确认', {
+      type: 'warning',
+      confirmButtonText: '确认下线',
+      cancelButtonText: '取消',
+    });
   } catch {
     return;
   }
@@ -110,6 +111,20 @@ async function handleDelete(row: PageMeta) {
   } catch (e) {
     ElMessage.error((e as Error).message || '删除失败');
   }
+}
+
+// 版本历史抽屉
+const versionDrawerVisible = ref(false);
+const versionDrawerPageId = ref('');
+
+function openVersionHistory(row: PageMeta) {
+  versionDrawerPageId.value = row.id;
+  versionDrawerVisible.value = true;
+}
+
+async function onVersionRolledBack() {
+  ElMessage.success('已回滚，列表已刷新');
+  await fetchList();
 }
 
 function statusTagType(status?: string) {
@@ -147,7 +162,7 @@ onMounted(() => {
         </template>
       </ElTableColumn>
       <ElTableColumn prop="updatedAt" label="更新时间" width="180" />
-      <ElTableColumn label="操作" width="280" fixed="right">
+      <ElTableColumn label="操作" width="340" fixed="right">
         <template #default="{ row }">
           <ElButton link type="primary" @click="goEdit(row)">编辑</ElButton>
           <ElButton
@@ -176,10 +191,17 @@ onMounted(() => {
           >
             预览
           </ElButton>
+          <ElButton link type="info" @click="openVersionHistory(row)">版本</ElButton>
           <ElButton link type="danger" @click="handleDelete(row)">删除</ElButton>
         </template>
       </ElTableColumn>
     </ElTable>
+    <VersionHistoryDrawer
+      v-model:visible="versionDrawerVisible"
+      :site-id="siteId"
+      :page-id="versionDrawerPageId"
+      @rolled-back="onVersionRolledBack"
+    />
   </div>
 </template>
 

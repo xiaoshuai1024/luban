@@ -15,7 +15,7 @@
     "install:e2e": "playwright install chromium",
     "lint": "eslint . && prettier --check . && stylelint \"**/*.{css,scss,vue}\"",
     "lint:fix": "eslint . --fix && prettier --write . && stylelint \"**/*.{css,scss,vue}\" --fix",
-    "depcruise": "depcruise src --config",
+    "depcruise": "depcruise src --config .dependency-cruiser.cjs",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -36,7 +36,10 @@
     "luban-low-code": "^0.0.2",
     "pinia": "^2.2.6",
     "vue": "^3.5.13",
-    "vue-router": "^4.4.5"
+    "vue-router": "^4.4.5",
+    "y-protocols": "^1.0.7",
+    "y-websocket": "^3.0.0",
+    "yjs": "^13.6.31"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, shallowRef, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElButton, ElInput, ElMessage } from 'element-plus';
-import { getPage, savePage, createPage } from '@/api/page';
+import { ElButton, ElInput, ElMessage, ElTag } from 'element-plus';
+import { getPage, savePage, createPage, publishPage, unpublishPage } from '@/api/page';
 import type { PageSchema, NodeSchema } from '@/types/schema';
 import { useDesignerKeyboard } from '@/composables/useDesignerKeyboard';
 
@@ -76,6 +76,11 @@ const pagePath = ref('');
 const loading = ref(false);
 const saving = ref(false);
 const designerError = ref<string | null>(null);
+// ===== 发布状态（T8：顶栏发布/下线 + 状态标签） =====
+const pageStatus = ref<string>(''); // 'published' | 'draft' | '' (未加载/新建)
+const publishing = ref(false);
+const isPublished = computed(() => pageStatus.value === 'published');
+const isExisting = computed(() => !isNew.value && !!pageId.value);
 
 // ===== 动态加载的组件引用 =====
 const LubanDesignerC = shallowRef<unknown>(null);
@@ -204,6 +209,7 @@ async function loadPage() {
     if (isNew.value) {
       pageName.value = '';
       pagePath.value = '';
+      pageStatus.value = '';
       schema.value = {
         root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
       };
@@ -211,6 +217,7 @@ async function loadPage() {
       const { data } = await getPage(siteId.value, pageId.value);
       pageName.value = data.name;
       pagePath.value = data.path;
+      pageStatus.value = data.status ?? 'draft';
       schema.value = data.schema ?? {
         root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
       };
@@ -485,6 +492,7 @@ async function handleSave() {
         schema: schema.value,
       });
       ElMessage.success('创建成功');
+      pageStatus.value = data.status ?? 'draft';
       router.replace(`/sites/${siteId.value}/pages/${data.id}`);
     } else {
       await savePage(siteId.value, pageId.value, {
@@ -499,6 +507,49 @@ async function handleSave() {
   } finally {
     saving.value = false;
   }
+}
+
+// ===== 发布 / 下线 / 草稿预览（T8） =====
+async function handlePublish() {
+  if (!siteId.value || !pageId.value) return;
+  // 发布前确保最新内容已保存：若 schema 有未保存改动（canUndo 成立），先保存。
+  // 这样避免「发布的是旧快照」。
+  if (canUndo.value) {
+    await handleSave();
+  }
+  publishing.value = true;
+  try {
+    const { data } = await publishPage(siteId.value, pageId.value);
+    pageStatus.value = data.status ?? 'published';
+    ElMessage.success('发布成功');
+  } catch (e) {
+    ElMessage.error((e as Error).message || '发布失败');
+  } finally {
+    publishing.value = false;
+  }
+}
+
+async function handleUnpublish() {
+  if (!siteId.value || !pageId.value) return;
+  publishing.value = true;
+  try {
+    const { data } = await unpublishPage(siteId.value, pageId.value);
+    pageStatus.value = data.status ?? 'draft';
+    ElMessage.success('已下线');
+  } catch (e) {
+    ElMessage.error((e as Error).message || '下线失败');
+  } finally {
+    publishing.value = false;
+  }
+}
+
+/** 打开草稿预览（访客视角预览当前未发布内容，新标签页） */
+function openDraftPreview() {
+  if (!siteId.value || !pageId.value) return;
+  const routeData = router.resolve({
+    path: `/sites/${siteId.value}/pages/${pageId.value}/preview`,
+  });
+  window.open(routeData.href, '_blank');
 }
 
 function goBack() {
@@ -545,8 +596,33 @@ watch([siteId, pageId], loadPage);
           />
         </div>
 
-        <!-- 右侧：保存按钮 -->
+        <!-- 右侧：状态标签 + 草稿预览 + 发布/下线 + 保存 -->
         <div class="page-editor__meta-right">
+          <!-- 状态标签（已发布/草稿） -->
+          <ElTag
+            v-if="isExisting"
+            :type="isPublished ? 'success' : 'info'"
+            size="small"
+            class="meta-status-tag"
+          >
+            {{ isPublished ? '已发布' : '草稿' }}
+          </ElTag>
+          <!-- 草稿预览（访客视角预览未发布内容） -->
+          <ElButton v-if="isExisting" text class="meta-preview-btn" @click="openDraftPreview">
+            预览
+          </ElButton>
+          <!-- 发布 / 下线（仅已存在的页面） -->
+          <ElButton
+            v-if="isExisting && !isPublished"
+            type="success"
+            :loading="publishing"
+            @click="handlePublish"
+          >
+            发布
+          </ElButton>
+          <ElButton v-if="isExisting && isPublished" :loading="publishing" @click="handleUnpublish">
+            下线
+          </ElButton>
           <ElButton type="primary" :loading="saving" @click="handleSave">保存</ElButton>
         </div>
       </header>
@@ -732,6 +808,15 @@ watch([siteId, pageId], loadPage);
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+// 状态标签与草稿预览按钮（T8）
+.meta-status-tag {
+  font-weight: 500;
+}
+
+.meta-preview-btn {
+  color: #606266;
 }
 
 // ===== 主体三栏 =====

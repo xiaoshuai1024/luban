@@ -47,3 +47,7 @@ test-output
 .pnpm-store
 tsconfig.tsbuildinfo
 cypress/screenshots/
+
+/playwright-report/
+/test-results/
+/playwright/.cache/

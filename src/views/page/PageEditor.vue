@@ -62,6 +62,16 @@ interface LubanLowCodeModule {
   bringToFront: (root: NodeSchema, id: string) => boolean;
   sendToBack: (root: NodeSchema, id: string) => boolean;
   genNodeId: (type: string) => string;
+  // T-ui-10：变体预设查表（来自 luban-low-code/snippets）
+  getSnippetById?: (id: string) =>
+    | {
+        id: string;
+        type: string;
+        name: string;
+        propsOverride: Record<string, unknown>;
+        children?: NodeSchema[];
+      }
+    | undefined;
 }
 
 const route = useRoute();
@@ -265,6 +275,37 @@ function onAddNode(type: string, parentId?: string) {
   const newSchema = { ...schema.value, root };
   onSchemaUpdate(newSchema);
   // 自动选中新节点
+  selectedNodeId.value = newNode.id;
+}
+
+/**
+ * T-ui-10：添加变体预设节点。
+ * 查表 snippet，把 defaultProps + propsOverride 合并为节点 props，
+ * snippet.children 作为预置子节点（各自分配 id）。
+ */
+function onAddSnippet(snippetId: string) {
+  if (!schema.value || !llc.value || !llc.value.getSnippetById) return;
+  const snippet = llc.value.getSnippetById(snippetId);
+  if (!snippet) return;
+  const meta = llc.value.getComponentMeta(snippet.type);
+  const baseProps = meta?.defaultProps ? JSON.parse(JSON.stringify(meta.defaultProps)) : {};
+  const newNode: NodeSchema = {
+    id: llc.value.genNodeId(snippet.type),
+    type: snippet.type,
+    // 合并：物料默认值 ← 变体覆盖
+    props: { ...baseProps, ...JSON.parse(JSON.stringify(snippet.propsOverride)) },
+    // 变体预置子节点：深拷贝并分配新 id（避免 id 冲突）
+    children: snippet.children
+      ? JSON.parse(JSON.stringify(snippet.children)).map((c: NodeSchema) => ({
+          ...c,
+          id: llc.value!.genNodeId(c.type),
+        }))
+      : [],
+  };
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  llc.value.insertNode(root, newNode, 'root');
+  const newSchema = { ...schema.value, root };
+  onSchemaUpdate(newSchema);
   selectedNodeId.value = newNode.id;
 }
 
@@ -642,7 +683,11 @@ watch([siteId, pageId], loadPage);
             {{ leftPanelCollapsed ? '▶' : '◀' }}
           </button>
           <div v-if="!leftPanelCollapsed && ComponentPanelC" class="page-editor__component-panel">
-            <component :is="ComponentPanelC" @add-node="(type: string) => onAddNode(type)" />
+            <component
+              :is="ComponentPanelC"
+              @add-node="(type: string) => onAddNode(type)"
+              @add-snippet="(snippetId: string) => onAddSnippet(snippetId)"
+            />
           </div>
         </aside>
 
@@ -673,6 +718,9 @@ watch([siteId, pageId], loadPage);
                 (id: string, from: string | null, to: string | null, idx: number) =>
                   onMoveNode(id, from, to, idx)
               "
+              @move-up="(id: string) => moveNodeReorder(id, 'up')"
+              @move-down="(id: string) => moveNodeReorder(id, 'down')"
+              @add-snippet="(snippetId: string) => onAddSnippet(snippetId)"
               @context-menu="(x: number, y: number, id: string) => onContextMenu(x, y, id)"
             />
             <!-- 代码模式：CodeEditor -->

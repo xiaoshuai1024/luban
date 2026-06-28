@@ -3,8 +3,25 @@ import { ref, computed, onMounted, watch, shallowRef, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElButton, ElInput, ElMessage, ElTag } from 'element-plus';
 import { getPage, savePage, createPage, publishPage, unpublishPage } from '@/api/page';
+import { getToken } from '@/api/request';
 import type { PageSchema, NodeSchema } from '@/types/schema';
 import { useDesignerKeyboard } from '@/composables/useDesignerKeyboard';
+import { useCollab } from '@/composables/useCollab';
+import DatasourceManageDialog from './components/DatasourceManageDialog.vue';
+
+/** 从 JWT payload 解析用户名（协作 awareness 用，失败降级为 '匿名用户'） */
+function getUsername(): string {
+  try {
+    const token = localStorage.getItem('luban_token');
+    if (!token) return '匿名用户';
+    const payload = token.split('.')[1];
+    if (!payload) return '匿名用户';
+    const decoded = JSON.parse(atob(payload)) as { sub?: string };
+    return decoded.sub ?? '匿名用户';
+  } catch {
+    return '匿名用户';
+  }
+}
 
 /**
  * T-eng-1: PageEditor 重写为完整 IDE 三栏布局
@@ -330,6 +347,12 @@ function onStyleUpdate(patch: Record<string, unknown>) {
 // ===== 撤销/重做 =====
 const isUndoRedoing = ref(false);
 
+// ===== 协作远端更新标志（防回环：远端推来的变更不再广播回远端） =====
+const isRemoteUpdate = ref(false);
+
+// ===== 数据源管理弹窗 =====
+const dsManageVisible = ref(false);
+
 function doUndo() {
   if (!history.value) return;
   history.value.undo();
@@ -597,6 +620,40 @@ function goBack() {
   router.push(`/sites/${siteId.value}/pages`);
 }
 
+// ===== 协作 CRDT 接线（useCollab 桥接） =====
+const {
+  status: collabStatus,
+  onlineUsers: collabOnlineUsers,
+  remoteSchema,
+  broadcastLocal,
+} = useCollab({
+  bffBase: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
+  siteId: siteId.value,
+  pageId: pageId.value,
+  token: getToken() ?? '',
+  username: getUsername(),
+  initialSchema: schema.value,
+  enabled: true,
+});
+
+// 远端 schema → 本地（防回环：置标志 → 写回 → nextTick 复位）
+watch(remoteSchema, (val) => {
+  if (!val) return;
+  isRemoteUpdate.value = true;
+  onSchemaUpdate(val);
+  nextTick(() => {
+    isRemoteUpdate.value = false;
+  });
+});
+
+// 本地 schema → 远端（仅在非远端更新、非 undo/redo 时广播）
+watch(schema, (val) => {
+  if (!val) return;
+  if (!isRemoteUpdate.value && !isUndoRedoing.value) {
+    broadcastLocal(val);
+  }
+});
+
 onMounted(loadPage);
 watch([siteId, pageId], loadPage);
 </script>
@@ -618,6 +675,7 @@ watch([siteId, pageId], loadPage);
           <ElButton text @click="goBack">← 返回</ElButton>
           <ElInput v-model="pageName" placeholder="页面名称" class="meta-input" />
           <ElInput v-model="pagePath" placeholder="/path" class="meta-input meta-path" />
+          <ElButton text @click="dsManageVisible = true">数据源</ElButton>
         </div>
 
         <!-- 中间：DesignerToolbar（撤销/重做/设备/模式） -->
@@ -629,6 +687,9 @@ watch([siteId, pageId], loadPage);
             :device="device"
             :mode="editorMode"
             :saving="saving"
+            :collab-enabled="true"
+            :collab-users="collabOnlineUsers"
+            :collab-status="collabStatus"
             @undo="onToolbarUndo"
             @redo="onToolbarRedo"
             @switch-device="onToolbarDevice"
@@ -785,6 +846,9 @@ watch([siteId, pageId], loadPage);
         @action="(a: MenuAction) => onContextMenuAction(a)"
         @close="contextMenuVisible = false"
       />
+
+      <!-- 数据源管理弹窗 -->
+      <DatasourceManageDialog v-model="dsManageVisible" :site-id="siteId" @change="loadPage" />
     </div>
   </div>
 </template>

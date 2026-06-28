@@ -6,6 +6,8 @@ import { getPage, savePage, createPage, publishPage, unpublishPage } from '@/api
 import { getToken } from '@/api/request';
 import type { PageSchema, NodeSchema } from '@/types/schema';
 import { useDesignerKeyboard } from '@/composables/useDesignerKeyboard';
+import { useAiChat } from '@/composables/useAiChat';
+import AiAssistantPanel from './components/AiAssistantPanel.vue';
 import { useCollab } from '@/composables/useCollab';
 import DatasourceManageDialog from './components/DatasourceManageDialog.vue';
 
@@ -129,6 +131,19 @@ const editorMode = ref<EditorMode>('design'); // design / preview / code
 const device = ref<DeviceType>('pc');
 const leftPanelCollapsed = ref(false);
 const rightPanelCollapsed = ref(false);
+
+// ===== AI 助手(M6) =====
+const aiPanelOpen = ref(false);
+function applyAiSchema(schemaJson: Record<string, unknown>) {
+  // AI 生成的 schema 应用到画布,走 onSchemaUpdate 入历史栈(可 Ctrl+Z 撤销)
+  const newSchema = {
+    ...(schema.value || { root: { id: 'root', type: 'LubanPage', children: [] } }),
+  };
+  newSchema.root = schemaJson.root as NodeSchema;
+  onSchemaUpdate(newSchema);
+  aiPanelOpen.value = false;
+}
+const aiChat = useAiChat({ siteId: () => siteId.value, pageId: () => pageId.value }, applyAiSchema);
 
 // ===== 历史栈（useHistory 加载后赋值） =====
 const history = ref<ReturnType<LubanLowCodeModule['useHistory']> | null>(null);
@@ -700,6 +715,16 @@ watch([siteId, pageId], loadPage);
 
         <!-- 右侧：状态标签 + 草稿预览 + 发布/下线 + 保存 -->
         <div class="page-editor__meta-right">
+          <!-- AI 助手按钮(M6) -->
+          <ElButton
+            type="primary"
+            plain
+            size="small"
+            class="meta-ai-btn"
+            @click="aiPanelOpen = true"
+          >
+            ✨ AI
+          </ElButton>
           <!-- 状态标签（已发布/草稿） -->
           <ElTag
             v-if="isExisting"
@@ -849,6 +874,9 @@ watch([siteId, pageId], loadPage);
 
       <!-- 数据源管理弹窗 -->
       <DatasourceManageDialog v-model="dsManageVisible" :site-id="siteId" @change="loadPage" />
+
+      <!-- AI 助手抽屉(M6) -->
+      <AiAssistantPanel v-model="aiPanelOpen" :ai="aiChat" />
     </div>
   </div>
 </template>

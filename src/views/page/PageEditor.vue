@@ -3,8 +3,27 @@ import { ref, computed, onMounted, watch, shallowRef, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElButton, ElInput, ElMessage, ElTag } from 'element-plus';
 import { getPage, savePage, createPage, publishPage, unpublishPage } from '@/api/page';
+import { getToken } from '@/api/request';
 import type { PageSchema, NodeSchema } from '@/types/schema';
 import { useDesignerKeyboard } from '@/composables/useDesignerKeyboard';
+import { useAiChat } from '@/composables/useAiChat';
+import AiAssistantPanel from './components/AiAssistantPanel.vue';
+import { useCollab } from '@/composables/useCollab';
+import DatasourceManageDialog from './components/DatasourceManageDialog.vue';
+
+/** 从 JWT payload 解析用户名（协作 awareness 用，失败降级为 '匿名用户'） */
+function getUsername(): string {
+  try {
+    const token = localStorage.getItem('luban_token');
+    if (!token) return '匿名用户';
+    const payload = token.split('.')[1];
+    if (!payload) return '匿名用户';
+    const decoded = JSON.parse(atob(payload)) as { sub?: string };
+    return decoded.sub ?? '匿名用户';
+  } catch {
+    return '匿名用户';
+  }
+}
 
 /**
  * T-eng-1: PageEditor 重写为完整 IDE 三栏布局
@@ -62,6 +81,16 @@ interface LubanLowCodeModule {
   bringToFront: (root: NodeSchema, id: string) => boolean;
   sendToBack: (root: NodeSchema, id: string) => boolean;
   genNodeId: (type: string) => string;
+  // T-ui-10：变体预设查表（来自 luban-low-code/snippets）
+  getSnippetById?: (id: string) =>
+    | {
+        id: string;
+        type: string;
+        name: string;
+        propsOverride: Record<string, unknown>;
+        children?: NodeSchema[];
+      }
+    | undefined;
 }
 
 const route = useRoute();
@@ -102,6 +131,19 @@ const editorMode = ref<EditorMode>('design'); // design / preview / code
 const device = ref<DeviceType>('pc');
 const leftPanelCollapsed = ref(false);
 const rightPanelCollapsed = ref(false);
+
+// ===== AI 助手(M6) =====
+const aiPanelOpen = ref(false);
+function applyAiSchema(schemaJson: Record<string, unknown>) {
+  // AI 生成的 schema 应用到画布,走 onSchemaUpdate 入历史栈(可 Ctrl+Z 撤销)
+  const newSchema = {
+    ...(schema.value || { root: { id: 'root', type: 'LubanPage', children: [] } }),
+  };
+  newSchema.root = schemaJson.root as NodeSchema;
+  onSchemaUpdate(newSchema);
+  aiPanelOpen.value = false;
+}
+const aiChat = useAiChat({ siteId: () => siteId.value, pageId: () => pageId.value }, applyAiSchema);
 
 // ===== 历史栈（useHistory 加载后赋值） =====
 const history = ref<ReturnType<LubanLowCodeModule['useHistory']> | null>(null);
@@ -268,6 +310,37 @@ function onAddNode(type: string, parentId?: string) {
   selectedNodeId.value = newNode.id;
 }
 
+/**
+ * T-ui-10：添加变体预设节点。
+ * 查表 snippet，把 defaultProps + propsOverride 合并为节点 props，
+ * snippet.children 作为预置子节点（各自分配 id）。
+ */
+function onAddSnippet(snippetId: string) {
+  if (!schema.value || !llc.value || !llc.value.getSnippetById) return;
+  const snippet = llc.value.getSnippetById(snippetId);
+  if (!snippet) return;
+  const meta = llc.value.getComponentMeta(snippet.type);
+  const baseProps = meta?.defaultProps ? JSON.parse(JSON.stringify(meta.defaultProps)) : {};
+  const newNode: NodeSchema = {
+    id: llc.value.genNodeId(snippet.type),
+    type: snippet.type,
+    // 合并：物料默认值 ← 变体覆盖
+    props: { ...baseProps, ...JSON.parse(JSON.stringify(snippet.propsOverride)) },
+    // 变体预置子节点：深拷贝并分配新 id（避免 id 冲突）
+    children: snippet.children
+      ? JSON.parse(JSON.stringify(snippet.children)).map((c: NodeSchema) => ({
+          ...c,
+          id: llc.value!.genNodeId(c.type),
+        }))
+      : [],
+  };
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  llc.value.insertNode(root, newNode, 'root');
+  const newSchema = { ...schema.value, root };
+  onSchemaUpdate(newSchema);
+  selectedNodeId.value = newNode.id;
+}
+
 // ===== 属性面板 patch 回写 =====
 function onPropUpdate(patch: Record<string, unknown>) {
   if (!schema.value || !selectedNodeId.value || !llc.value) return;
@@ -288,6 +361,12 @@ function onStyleUpdate(patch: Record<string, unknown>) {
 
 // ===== 撤销/重做 =====
 const isUndoRedoing = ref(false);
+
+// ===== 协作远端更新标志（防回环：远端推来的变更不再广播回远端） =====
+const isRemoteUpdate = ref(false);
+
+// ===== 数据源管理弹窗 =====
+const dsManageVisible = ref(false);
 
 function doUndo() {
   if (!history.value) return;
@@ -556,6 +635,40 @@ function goBack() {
   router.push(`/sites/${siteId.value}/pages`);
 }
 
+// ===== 协作 CRDT 接线（useCollab 桥接） =====
+const {
+  status: collabStatus,
+  onlineUsers: collabOnlineUsers,
+  remoteSchema,
+  broadcastLocal,
+} = useCollab({
+  bffBase: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
+  siteId: siteId.value,
+  pageId: pageId.value,
+  token: getToken() ?? '',
+  username: getUsername(),
+  initialSchema: schema.value,
+  enabled: true,
+});
+
+// 远端 schema → 本地（防回环：置标志 → 写回 → nextTick 复位）
+watch(remoteSchema, (val) => {
+  if (!val) return;
+  isRemoteUpdate.value = true;
+  onSchemaUpdate(val);
+  nextTick(() => {
+    isRemoteUpdate.value = false;
+  });
+});
+
+// 本地 schema → 远端（仅在非远端更新、非 undo/redo 时广播）
+watch(schema, (val) => {
+  if (!val) return;
+  if (!isRemoteUpdate.value && !isUndoRedoing.value) {
+    broadcastLocal(val);
+  }
+});
+
 onMounted(loadPage);
 watch([siteId, pageId], loadPage);
 </script>
@@ -577,6 +690,7 @@ watch([siteId, pageId], loadPage);
           <ElButton text @click="goBack">← 返回</ElButton>
           <ElInput v-model="pageName" placeholder="页面名称" class="meta-input" />
           <ElInput v-model="pagePath" placeholder="/path" class="meta-input meta-path" />
+          <ElButton text @click="dsManageVisible = true">数据源</ElButton>
         </div>
 
         <!-- 中间：DesignerToolbar（撤销/重做/设备/模式） -->
@@ -588,6 +702,9 @@ watch([siteId, pageId], loadPage);
             :device="device"
             :mode="editorMode"
             :saving="saving"
+            :collab-enabled="true"
+            :collab-users="collabOnlineUsers"
+            :collab-status="collabStatus"
             @undo="onToolbarUndo"
             @redo="onToolbarRedo"
             @switch-device="onToolbarDevice"
@@ -598,6 +715,16 @@ watch([siteId, pageId], loadPage);
 
         <!-- 右侧：状态标签 + 草稿预览 + 发布/下线 + 保存 -->
         <div class="page-editor__meta-right">
+          <!-- AI 助手按钮(M6) -->
+          <ElButton
+            type="primary"
+            plain
+            size="small"
+            class="meta-ai-btn"
+            @click="aiPanelOpen = true"
+          >
+            ✨ AI
+          </ElButton>
           <!-- 状态标签（已发布/草稿） -->
           <ElTag
             v-if="isExisting"
@@ -642,7 +769,11 @@ watch([siteId, pageId], loadPage);
             {{ leftPanelCollapsed ? '▶' : '◀' }}
           </button>
           <div v-if="!leftPanelCollapsed && ComponentPanelC" class="page-editor__component-panel">
-            <component :is="ComponentPanelC" @add-node="(type: string) => onAddNode(type)" />
+            <component
+              :is="ComponentPanelC"
+              @add-node="(type: string) => onAddNode(type)"
+              @add-snippet="(snippetId: string) => onAddSnippet(snippetId)"
+            />
           </div>
         </aside>
 
@@ -673,6 +804,9 @@ watch([siteId, pageId], loadPage);
                 (id: string, from: string | null, to: string | null, idx: number) =>
                   onMoveNode(id, from, to, idx)
               "
+              @move-up="(id: string) => moveNodeReorder(id, 'up')"
+              @move-down="(id: string) => moveNodeReorder(id, 'down')"
+              @add-snippet="(snippetId: string) => onAddSnippet(snippetId)"
               @context-menu="(x: number, y: number, id: string) => onContextMenu(x, y, id)"
             />
             <!-- 代码模式：CodeEditor -->
@@ -737,6 +871,12 @@ watch([siteId, pageId], loadPage);
         @action="(a: MenuAction) => onContextMenuAction(a)"
         @close="contextMenuVisible = false"
       />
+
+      <!-- 数据源管理弹窗 -->
+      <DatasourceManageDialog v-model="dsManageVisible" :site-id="siteId" @change="loadPage" />
+
+      <!-- AI 助手抽屉(M6) -->
+      <AiAssistantPanel v-model="aiPanelOpen" :ai="aiChat" />
     </div>
   </div>
 </template>

@@ -60,6 +60,18 @@ const router = createRouter({
           meta: { title: '草稿预览' },
         },
         {
+          path: 'sites/:siteId/leads',
+          name: 'LeadList',
+          component: () => import('@/views/lead/LeadList.vue'),
+          meta: { title: '线索中心' },
+        },
+        {
+          path: 'sites/:siteId/forms',
+          name: 'FormList',
+          component: () => import('@/views/form/FormList.vue'),
+          meta: { title: '表单管理' },
+        },
+        {
           path: 'users',
           name: 'UserList',
           component: () => import('@/views/user/UserList.vue'),

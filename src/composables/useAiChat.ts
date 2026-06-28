@@ -144,9 +144,33 @@ export function useAiChat(
         assistantMsg.content = '已生成待确认的页面结构';
         break;
       }
-      case 'confirm':
-        assistantMsg.content = '等待确认…';
+      case 'confirm': {
+        // P0-1 修复:confirm 终态事件携带 schema(整页生成),读入 pendingSchema 供 HITL 确认。
+        // AI 服务 chat.py:78 发 {"type":"confirm","schema":{...}}
+        const confirmSchema = evt.schema as Record<string, unknown> | undefined;
+        if (confirmSchema) {
+          pendingSchema.value = confirmSchema;
+          assistantMsg.content = '已生成页面结构,请确认是否应用';
+        } else {
+          assistantMsg.content = '等待确认…';
+        }
         break;
+      }
+      case 'tool': {
+        // P1 修复:understand/retrieve/generate/validate 节点的工具步骤也显示
+        const toolName = String(evt.tool || 'step');
+        const ok = evt.ok;
+        assistantMsg.progress!.push(ok === false ? `⚠ ${toolName} 失败` : `🔧 ${toolName}`);
+        break;
+      }
+      case 'warning': {
+        // P1 修复:校验通过但缺失物料的警告
+        const missing = evt.missing_materials as string[] | undefined;
+        if (missing && missing.length) {
+          assistantMsg.progress!.push(`⚠ 物料未注册: ${missing.join(', ')}`);
+        }
+        break;
+      }
       case 'done':
         assistantMsg.content = assistantMsg.content || '完成';
         if (evt.status) assistantMsg.content += `(${evt.status})`;

@@ -1,32 +1,29 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { ElRow, ElCol, ElCard, ElStatistic } from 'element-plus'
-import { getSites } from '@/api/site'
-import { getUsers } from '@/api/user'
+import { ref, onMounted } from 'vue';
+import { ElRow, ElCol, ElCard, ElStatistic, ElMessage } from 'element-plus';
+import { getSites } from '@/api/site';
+import { getUsers } from '@/api/user';
 
-const siteCount = ref(0)
-const userCount = ref(0)
+const siteCount = ref(0);
+const userCount = ref(0);
+const loading = ref(false);
 
 onMounted(async () => {
-    console.log('[Dashboard] onMounted')
-
+  loading.value = true;
   try {
-    const [sitesRes, usersRes] = await Promise.all([
-      getSites().catch(() => ({ data: [] })),
-      getUsers().catch(() => ({ data: { list: [], total: 0 } })),
-    ])
-    siteCount.value = Array.isArray(sitesRes.data) ? sitesRes.data.length : 0
-    userCount.value = usersRes.data?.total ?? 0
+    const [sitesRes, usersRes] = await Promise.all([getSites(), getUsers()]);
+    siteCount.value = Array.isArray(sitesRes.data) ? sitesRes.data.length : 0;
+    userCount.value = usersRes.data?.total ?? 0;
   } catch {
-    // mock for demo
-    siteCount.value = 0
-    userCount.value = 0
+    ElMessage.error('加载数据失败，请检查网络后刷新');
+  } finally {
+    loading.value = false;
   }
-})
+});
 </script>
 
 <template>
-  <div class="dashboard">
+  <div v-loading="loading" class="dashboard">
     <ElRow :gutter="20">
       <ElCol :span="8">
         <ElCard shadow="hover" class="dashboard__card">
@@ -44,7 +41,7 @@ onMounted(async () => {
         </ElCard>
       </ElCol>
     </ElRow>
-    <ElRow :gutter="20" style="margin-top: 20px">
+    <ElRow :gutter="20" class="dashboard__quick">
       <ElCol :span="24">
         <ElCard shadow="hover">
           <template #header>快捷入口</template>
@@ -64,6 +61,10 @@ onMounted(async () => {
   margin-bottom: 0;
 }
 
+.dashboard__quick {
+  margin-top: 20px;
+}
+
 .dashboard__links {
   display: flex;
   gap: 16px;
@@ -71,9 +72,10 @@ onMounted(async () => {
 }
 
 .dashboard__link {
-  color: #409eff;
+  color: var(--el-color-primary);
   text-decoration: none;
   font-size: 14px;
+
   &:hover {
     text-decoration: underline;
   }

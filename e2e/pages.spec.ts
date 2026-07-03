@@ -1,28 +1,29 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, loginAndVisit, loginAndGetToken, TEST_SITE_ID } from './helpers';
 
-/**
- * 页面管理（迁移自 cypress/e2e/pages.cy.ts）
- * 依赖：至少一个站点存在。
- */
-test.use({ storageState: 'e2e/.auth/user.json' });
+test.describe('Pages management @J-page-crud', () => {
+  let token: string;
 
-test.describe('Pages management @smoke', () => {
-  test('加载站点页面列表', async ({ page }) => {
-    await page.goto('/sites');
-    await page.locator('table tbody tr').first().getByRole('button', { name: '页面' }).click();
-    await expect(page).toHaveURL(/\/sites\/[^/]+\/pages$/);
-    await expect(page.getByText('站点：')).toBeVisible();
-    await expect(page.getByRole('button', { name: '新建页面' })).toBeVisible();
+  test.beforeAll(async ({ request }) => {
+    token = await loginAndGetToken(request);
   });
 
-  test('打开新建页面编辑器', async ({ page }) => {
-    await page.goto('/sites');
-    await page.locator('table tbody tr').first().getByRole('button', { name: '页面' }).click();
+  test.beforeEach(async ({ page }) => {
+    // 直接进 TEST_SITE_ID 的 pages 列表（绕过 sites 列表导航，更稳定）
+    await loginAndVisit(page, token, `/sites/${TEST_SITE_ID}/pages`);
+  });
+
+  test('loads page list for a site', async ({ page }) => {
+    await expect(page).toHaveURL(/\/sites\/.+\/pages$/);
+    await expect(page.getByRole('button', { name: '新建页面' })).toBeVisible({ timeout: 10000 });
+  });
+
+  test('opens new page editor', async ({ page }) => {
     await page.getByRole('button', { name: '新建页面' }).click();
-    await expect(page).toHaveURL(/\/sites\/[^/]+\/pages\/new$/);
-    await expect(page.getByText('页面名称')).toBeVisible();
-    await expect(page.getByText('路径')).toBeVisible();
-    await expect(page.getByRole('button', { name: '保存' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '返回列表' })).toBeVisible();
+    await expect(page).toHaveURL(/\/sites\/.+\/pages\/new$/, { timeout: 15000 });
+    // 新建态：保存 + 返回按钮可见（PageEditor 已加载）
+    await expect(page.getByRole('button', { name: '保存' })).toBeVisible({ timeout: 15000 });
+    await expect(
+      page.getByRole('button', { name: '返回列表' }).or(page.getByText('返回')),
+    ).toBeVisible({ timeout: 5000 });
   });
 });

@@ -6,6 +6,7 @@ tmp
 out-tsc
 *.tsbuildinfo
 *.tsbuildinfo.*
+tsconfig.tsbuildinfo
 
 # dependencies
 node_modules
@@ -48,6 +49,9 @@ vitest.config.*.timestamp*
 test-output
 .pnpm-store
 
+# Cypress（已迁移到 Playwright，保留历史产物忽略）
+cypress/screenshots/
+
 # Playwright E2E 产物（迁移自 cypress，2026-06-19）
 /test-results/
 /playwright-report/
@@ -58,4 +62,4 @@ test-output
 
 # Prod secrets on server (copy from app.env.example)
 deploy/environments/prod/app.env
-deploy/environments/prod/secrets/"cov.log"  
+deploy/environments/prod/secrets/"cov.log"

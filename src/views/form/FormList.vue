@@ -1,146 +1,146 @@
 <script setup lang="ts">
-/**
- * FormList.vue — V2-T6 表单管理列表。
- *
- * 列出当前站点的所有表单（getForms），展示 name/status/dedupKeys 摘要。
- * 支持新建（跳 FormConfig）/编辑/删除。
- *
- * 依赖 api/form.ts（已就绪）。FeatureGate：VITE_FEATURE_FORMS 控制侧边栏入口。
- */
-import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import {
-  ElButton,
   ElTable,
   ElTableColumn,
+  ElTag,
+  ElButton,
+  ElEmpty,
   ElMessage,
   ElMessageBox,
-  ElTag,
-  ElEmpty,
-} from 'element-plus'
-import { getForms, type FormResponse } from '@/api/form'
+} from 'element-plus';
+import { getForms, deleteForm, FORM_STATUS_MAP, type Form } from '@/api/form';
+import FormEditor from './FormEditor.vue';
 
-const route = useRoute()
-const router = useRouter()
-const siteId = computed(() => route.params.siteId as string)
-const forms = ref<FormResponse[]>([])
-const loading = ref(false)
+/**
+ * 表单管理列表（仿 LeadList.vue）。
+ * 支持新建/编辑/删除（有线索时后端 409）/查看线索。
+ */
+const route = useRoute();
+const router = useRouter();
+const siteId = route.params.siteId as string;
 
-/** 当前 site id（侧边栏入口可能从 localStorage 取，这里优先 route） */
-const currentSiteId = computed(() => {
-  if (siteId.value) return siteId.value
-  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('luban_current_site_id') : null
-  return stored || ''
-})
+const list = ref<Form[]>([]);
+const loading = ref(false);
 
-async function fetchForms() {
-  if (!currentSiteId.value) {
-    forms.value = []
-    return
-  }
-  loading.value = true
+// 编辑抽屉
+const editorVisible = ref(false);
+const editingId = ref<string | null>(null);
+
+async function fetchList() {
+  loading.value = true;
   try {
-    const { data } = await getForms(currentSiteId.value)
-    forms.value = Array.isArray(data) ? data : []
+    const { data } = await getForms(siteId);
+    list.value = data ?? [];
   } catch (e) {
-    forms.value = []
-    ElMessage.error((e as Error)?.message || '加载表单失败')
+    list.value = [];
+    ElMessage.error((e as Error).message || '加载表单失败');
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
-function goNew() {
-  router.push(`/sites/${currentSiteId.value}/forms/new`)
+function openCreate() {
+  editingId.value = null;
+  editorVisible.value = true;
 }
 
-function goEdit(row: FormResponse) {
-  router.push(`/sites/${currentSiteId.value}/forms/${row.id}`)
+function openEdit(row: Form) {
+  editingId.value = row.id;
+  editorVisible.value = true;
 }
 
-async function handleDelete(row: FormResponse) {
+function viewLeads(row: Form) {
+  router.push(`/sites/${siteId}/leads?formId=${row.id}`);
+}
+
+async function handleDelete(row: Form) {
   try {
-    await ElMessageBox.confirm(`确定删除表单「${row.name}」？删除后已绑定的留资组件将无法提交。`, '提示', { type: 'warning' })
+    await ElMessageBox.confirm(`确认删除表单「${row.name}」？`, '提示', {
+      type: 'warning',
+    });
   } catch {
-    return
+    return; // 用户取消
   }
-  // 复用 form api（delete 由后端提供；此处用 updateForm status=archived 软删兜底）
   try {
-    // 注意：form.ts 暂无 deleteForm；这里仅提示（后端按需扩展）
-    ElMessage.info('表单删除需后端支持 DELETE /forms/:id（如已实现请补充 api）')
-  } catch (e) {
-    ElMessage.error((e as Error).message || '删除失败')
+    await deleteForm(siteId, row.id);
+    ElMessage.success('表单已删除');
+    fetchList();
+  } catch (e: unknown) {
+    const err = e as {
+      response?: { status?: number; data?: { message?: string } };
+      message?: string;
+    };
+    if (err.response?.status === 409) {
+      ElMessage.error(err.response?.data?.message || '表单下存在线索，无法删除');
+    } else {
+      ElMessage.error(err.message || '删除失败');
+    }
   }
 }
 
-/** 去重规则摘要展示 */
-function dedupSummary(row: FormResponse): string {
-  if (!row.dedupKeys || row.dedupKeys.length === 0) return '未启用'
-  const keys = row.dedupKeys.join(', ')
-  const window = row.dedupWindow ? `（${row.dedupWindow}秒内）` : ''
-  return `${keys}${window}`
+type TagType = 'success' | 'primary' | 'warning' | 'info' | 'danger';
+
+function statusTagType(status: string): TagType {
+  return (FORM_STATUS_MAP[status]?.type ?? 'info') as TagType;
+}
+function statusLabel(status: string): string {
+  return FORM_STATUS_MAP[status]?.label ?? status;
 }
 
-onMounted(() => {
-  fetchForms()
-})
+onMounted(fetchList);
 </script>
 
 <template>
   <div class="form-list">
+    <h1 class="form-list__title">表单管理</h1>
+
     <div class="form-list__toolbar">
-      <span class="form-list__title">表单管理</span>
-      <ElButton type="primary" :disabled="!currentSiteId" @click="goNew">新建表单</ElButton>
+      <ElButton type="primary" @click="openCreate">新建表单</ElButton>
     </div>
-    <p v-if="!currentSiteId" class="form-list__hint">
-      请先在站点管理中选择一个站点。
-    </p>
-    <ElEmpty v-else-if="!loading && forms.length === 0" description="暂无表单，点击「新建表单」创建">
-      <ElButton type="primary" @click="goNew">新建表单</ElButton>
-    </ElEmpty>
-    <ElTable v-else :data="forms" v-loading="loading" stripe>
-      <ElTableColumn prop="name" label="表单名称" min-width="160" />
-      <ElTableColumn prop="status" label="状态" width="100">
+
+    <ElTable v-loading="loading" :data="list" border style="width: 100%">
+      <ElTableColumn label="表单名称" prop="name" min-width="140" />
+      <ElTableColumn label="状态" width="90">
         <template #default="{ row }">
-          <ElTag size="small" :type="row.status === 'active' ? 'success' : 'info'">
-            {{ row.status === 'active' ? '启用' : row.status }}
-          </ElTag>
+          <ElTag :type="statusTagType(row.status)" size="small">{{
+            statusLabel(row.status)
+          }}</ElTag>
         </template>
       </ElTableColumn>
-      <ElTableColumn label="去重规则" min-width="180">
+      <ElTableColumn label="去重策略" prop="dedupPolicy" width="110" />
+      <ElTableColumn label="更新时间" min-width="160">
+        <template #default="{ row }">{{ row.updatedAt || row.createdAt }}</template>
+      </ElTableColumn>
+      <ElTableColumn label="操作" width="220" fixed="right">
         <template #default="{ row }">
-          {{ dedupSummary(row) }}
+          <ElButton type="primary" link @click="openEdit(row)">编辑</ElButton>
+          <ElButton type="success" link @click="viewLeads(row)">查看线索</ElButton>
+          <ElButton type="danger" link @click="handleDelete(row)">删除</ElButton>
         </template>
       </ElTableColumn>
-      <ElTableColumn prop="createdAt" label="创建时间" width="180" />
-      <ElTableColumn label="操作" width="160" fixed="right">
-        <template #default="{ row }">
-          <ElButton link type="primary" @click="goEdit(row)">编辑</ElButton>
-          <ElButton link type="danger" @click="handleDelete(row)">删除</ElButton>
-        </template>
-      </ElTableColumn>
+      <template #empty>
+        <ElEmpty description="暂无表单" />
+      </template>
     </ElTable>
+
+    <FormEditor v-model="editorVisible" :site-id="siteId" :form-id="editingId" @saved="fetchList" />
   </div>
 </template>
 
-<style lang="scss" scoped>
+<style scoped>
 .form-list {
-  &__toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 16px;
-  }
+  padding: 16px;
+}
 
-  &__title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #303133;
-  }
+.form-list__title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 16px;
+}
 
-  &__hint {
-    color: #909399;
-    font-size: 14px;
-  }
+.form-list__toolbar {
+  margin-bottom: 16px;
 }
 </style>

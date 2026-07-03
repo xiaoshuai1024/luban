@@ -1,648 +1,883 @@
 <script setup lang="ts">
-/**
- * PageEditor.vue — 页面编辑器（T4 收口版）。
- *
- * 三栏布局：
- *   左 物料区（getPaletteGroups 渲染可拖拽卡片，dragstart 写 dataTransfer）
- *   中 画布（isDesign=true → LubanDesigner[design-mode]；false → LubanPage 只读预览）
- *   右 组件树 + 属性面板
- *
- * 与 luban-low-code 的契约（静态 import，不再动态 import + shallowRef）：
- *   - LubanDesigner.props: schema / designMode / showToolbar / placeholder
- *   - LubanDesigner.emits: update:schema / select(id|null) / add-node(type, parentId?)
- *       / reorder(fromIdx, toIdx)（root 级 Sortable onEnd）
- *   - LubanPage.props: schema
- *   - getComponentMeta(type) → ComponentMeta | undefined（含 label / defaultProps / propSchema）
- *   - getPaletteGroups() → PaletteGroup[]
- *   - reorderRootChildren(schema, fromIdx, toIdx)（root 级重排，原地变更）
- *   - canAcceptChild(type) / isContainerType(type)（容器判定）
- *
- * 选中/增删改/移动全部走 schemaTree（engine 本地纯逻辑），保证 LubanDesigner
- * emit 后真实写入 schema.root；属性面板与组件树共享 selectedId。
- *
- * 发布：复用 savePage（PUT /sites/:siteId/pages/:pageId），带 status='published'
- * （publishPage helper）。不引入独立 publish 端点，保持 Java/Go 双后端契约一致。
- *
- * 错误态：loadPage 失败不再静默回退空 schema；显示错误卡片 + 重试按钮。
- */
-import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import {
-  ElButton,
-  ElInput,
-  ElFormItem,
-  ElForm,
-  ElMessage,
-  ElCard,
-  ElContainer,
-  ElAside,
-  ElMain,
-  ElTag,
-  ElMessageBox,
-  ElDropdown,
-  ElDropdownMenu,
-  ElDropdownItem,
-} from 'element-plus'
-import { getPage, savePage, createPage, publishPage } from '@/api/page'
-import { getDatasources, queryDatasource } from '@/api/datasource'
-import type { PageSchema, NodeSchema } from '@/types/schema'
-import {
-  LubanDesigner,
-  LubanPage,
-  getComponentMeta,
-  getPaletteGroups,
-} from 'luban-low-code'
-import type { ResponsiveBreakpoint } from 'luban-low-code'
-import PropertyPanel from './components/PropertyPanel.vue'
-import ComponentTree from './components/ComponentTree.vue'
-import { findNode } from './components/schemaTree'
-import { useHistory } from '@/composables/useHistory'
-import { useKeyboard } from '@/composables/useKeyboard'
-import { useFeatureGate } from '@/composables/useFeatureGate'
-import { usePageEditorApi } from '@/composables/usePageEditorApi'
-import AiAssistantPanel from './components/AiAssistantPanel.vue'
+import { ref, computed, onMounted, watch, shallowRef, nextTick } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { ElButton, ElInput, ElMessage, ElTag } from 'element-plus';
+import { getPage, savePage, createPage, publishPage, unpublishPage } from '@/api/page';
+import { getToken } from '@/api/request';
+import type { PageSchema, NodeSchema } from '@/types/schema';
+import { useDesignerKeyboard } from '@/composables/useDesignerKeyboard';
+import { useAiChat } from '@/composables/useAiChat';
+import AiAssistantPanel from './components/AiAssistantPanel.vue';
+import { useCollab } from '@/composables/useCollab';
+import DatasourceManageDialog from './components/DatasourceManageDialog.vue';
 
-const route = useRoute()
-const router = useRouter()
-const siteId = computed(() => route.params.siteId as string)
-const pageId = computed(() => route.params.pageId as string)
-const isNew = computed(() => route.name === 'PageNew' || Boolean(route.meta.isNew))
-/** 是否在全屏设计器模式（独立路由 /designer/...，无侧边栏/顶栏） */
-const isDesignerMode = computed(() => Boolean(route.meta.designer))
-
-const pageName = ref('')
-const pagePath = ref('')
-const pageStatus = ref<string>('draft')
-const schema = ref<PageSchema | null>(null)
-/** 当前 site 的数据源列表（PropertyPanel 数据源区消费）。 */
-const datasources = ref<Array<{ id: string; name: string }>>([])
-/** 预览时数据源拉取器（传给 LubanPage 注入表达式上下文）；透传 node.datasource.params。 */
-const datasourceFetcher = (id: string, params?: Record<string, unknown>) =>
-  queryDatasource(id, params).then((r) => r.data)
-const loading = ref(false)
-const saving = ref(false)
-const publishing = ref(false)
-const loadError = ref<string | null>(null)
-
-/** 选中节点 id（画布选中、组件树选中、属性面板共同消费）。null 表示未选。 */
-const selectedId = ref<string | null>(null)
-/** V2-T11 多选：所有选中节点 ID（单选时含 1 个；selectedId 为主要焦点） */
-const selectedIds = ref<string[]>([])
-/** V2-T11 多选 FeatureGate */
-const multiSelectEnabled = isFeatureEnabled('multiSelect')
-/** 设计/预览模式切换：true=设计画布，false=只读渲染预览。 */
-const isDesign = ref(true)
-
-/** 撤销/重做历史栈（结构变更与属性变更均入栈；属性输入噪声由 limit 截断兜底）。 */
-const history = useHistory(schema)
-const { canUndo, canRedo } = history
-const { isEnabled } = useFeatureGate()
-const featureUndo = isEnabled('editor.undo')
-const featureShortcuts = isEnabled('editor.shortcuts')
-
-/**
- * 画布操作收口（plan P1-T8）：所有 schema mutation 经 api，撤销栈语义统一。
- * AI 面板（AiAssistantPanel）与用户操作共享同一 schema + 撤销栈 ——
- * AI 改动可被 Ctrl+Z 撤销（plan §3 验收口径）。
- */
-const api = usePageEditorApi({ schema, history, selectedId })
-
-/** AI 助手面板开关（FeatureGate ai.assistant 关则隐藏入口，编辑器回归原状）。 */
-const featureAiAssistant = isEnabled('ai.assistant')
-const aiPanelOpen = ref(false)
-
-if (featureShortcuts) {
-  useKeyboard({
-    undo: () => history.undo(),
-    redo: () => history.redo(),
-    save: () => handleSave(),
-    delete: () => { if (selectedId.value) api.deleteNode(selectedId.value) },
-    duplicate: () => { if (selectedId.value) api.duplicateNode(selectedId.value) },
-  })
-}
-
-/** 物料面板分组（一次性派生；物料注册在 luban-low-code side-effect import 完成）。 */
-const paletteGroups = computed(() => getPaletteGroups())
-
-/** 面板搜索过滤 */
-const paletteSearch = ref('')
-/** 折叠的分类集合 */
-const collapsedCategories = ref<Set<string>>(new Set())
-function toggleCategory(cat: string) {
-  if (collapsedCategories.value.has(cat)) {
-    collapsedCategories.value.delete(cat)
-  } else {
-    collapsedCategories.value.add(cat)
+/** 从 JWT payload 解析用户名（协作 awareness 用，失败降级为 '匿名用户'） */
+function getUsername(): string {
+  try {
+    const token = localStorage.getItem('luban_token');
+    if (!token) return '匿名用户';
+    const payload = token.split('.')[1];
+    if (!payload) return '匿名用户';
+    const decoded = JSON.parse(atob(payload)) as { sub?: string };
+    return decoded.sub ?? '匿名用户';
+  } catch {
+    return '匿名用户';
   }
 }
 
-/** 搜索过滤后的分组（空分组隐藏，空搜索则全显示） */
-const filteredPaletteGroups = computed(() => {
-  const q = paletteSearch.value.trim().toLowerCase()
-  if (!q) return paletteGroups.value
-  return paletteGroups.value
-    .map((g) => ({
-      ...g,
-      items: g.items.filter(
-        (it) =>
-          it.label.toLowerCase().includes(q) ||
-          it.type.toLowerCase().includes(q)
-      ),
-    }))
-    .filter((g) => g.items.length > 0)
-})
+/**
+ * T-eng-1: PageEditor 重写为完整 IDE 三栏布局
+ *
+ * 装配顺序（W1 接线）：
+ *   T-eng-1: 布局骨架 + designMode=true（本文件）
+ *   T-eng-2: DesignerToolbar emit 接线（undo/redo/device/mode/template/save）
+ *   T-eng-3: PropertyPanel 接线（selectedNodeId → getComponentMeta → patch）
+ *   T-eng-4: ComponentPanel 接线（HTML5 drag → add-node emit）
+ *   T-eng-5: OutlineTree 接线（select/delete/duplicate/reorder）
+ *   T-eng-6: ContextMenu + useDesignerKeyboard 全局快捷键
+ *   T-eng-7: CodeEditor 接线（代码模式双向绑定）
+ *
+ * 所有 luban-low-code 组件通过动态 import 加载（避免引擎硬依赖）。
+ */
 
-/** 组件类型 → SVG 图标（精简 20x20 viewBox） */
-const COMPONENT_ICONS: Record<string, string> = {
-  // 信息
-  LubanButton: '<rect x="2" y="5" width="16" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="6" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.5"/>',
-  LubanText: '<line x1="3" y1="6" x2="17" y2="6" stroke="currentColor" stroke-width="1.5"/><line x1="3" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.5"/><line x1="3" y1="14" x2="10" y2="14" stroke="currentColor" stroke-width="1.5"/>',
-  LubanBanner: '<rect x="2" y="3" width="16" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.2"/><polyline points="4,15 7,12 9,13 13,9 16,11" fill="none" stroke="currentColor" stroke-width="1.2"/>',
-  LubanContentList: '<rect x="2" y="3" width="16" height="3" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="2" y="8" width="16" height="3" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="2" y="13" width="16" height="3" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/>',
-  // 布局
-  LubanContainer: '<rect x="3" y="3" width="14" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2,2"/>',
-  LubanRow: '<rect x="2" y="5" width="16" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="5" x2="10" y2="15" stroke="currentColor" stroke-width="1.2"/>',
-  LubanCol: '<rect x="2" y="2" width="7" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="2" width="7" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>',
-  LubanSidePanel: '<rect x="12" y="2" width="6" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="2" width="8" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>',
-  // 表单
-  LubanForm: '<rect x="2" y="2" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="5" y1="7" x2="15" y2="7" stroke="currentColor" stroke-width="1.2"/><line x1="5" y1="11" x2="12" y2="11" stroke="currentColor" stroke-width="1.2"/>',
-  LubanInput: '<rect x="2" y="7" width="16" height="6" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="5" y1="10" x2="8" y2="10" stroke="currentColor" stroke-width="1.2"/>',
-  LubanTextArea: '<rect x="2" y="5" width="16" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="5" y1="8" x2="12" y2="8" stroke="currentColor" stroke-width="1.2"/><line x1="5" y1="12" x2="9" y2="12" stroke="currentColor" stroke-width="1.2"/>',
-  LubanSelect: '<rect x="2" y="7" width="16" height="6" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><polyline points="5,12 10,16 15,12" fill="none" stroke="currentColor" stroke-width="1.3"/>',
-  LubanCheckbox: '<rect x="3" y="7" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><polyline points="5,10 7,12 10,8" fill="none" stroke="currentColor" stroke-width="1.5"/>',
-  LubanRadioGroup: '<circle cx="7" cy="10" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="7" cy="10" r="1.5" fill="currentColor"/><line x1="12" y1="10" x2="18" y2="10" stroke="currentColor" stroke-width="1.3"/>',
-  LubanSwitch: '<rect x="2" y="6" width="16" height="8" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="6" cy="10" r="3" fill="currentColor"/>',
-  // 营销
-  LubanHero: '<rect x="2" y="2" width="16" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="6" y1="5" x2="14" y2="5" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="11" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="11" y="11" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/>',
-  LubanCTA: '<rect x="2" y="2" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="6" y1="7" x2="14" y2="7" stroke="currentColor" stroke-width="1.5"/><rect x="6" y="11" width="8" height="4" rx="2" fill="currentColor" opacity="0.3"/>',
-  LubanTestimonial: '<circle cx="5" cy="5" r="3" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="4" y1="10" x2="16" y2="10" stroke="currentColor" stroke-width="1.3"/><line x1="4" y1="13" x2="14" y2="13" stroke="currentColor" stroke-width="1.3"/>',
-  LubanTestimonialCarousel: '<circle cx="4" cy="4" r="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/><line x1="3" y1="9" x2="17" y2="9" stroke="currentColor" stroke-width="1.2"/><line x1="3" y1="12" x2="15" y2="12" stroke="currentColor" stroke-width="1.2"/><circle cx="16" cy="4" r="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/>',
-  LubanLeadCapture: '<rect x="2" y="2" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="5" y="5" width="10" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="5" y="11" width="10" height="3" rx="1" fill="currentColor" opacity="0.3"/>',
-  LubanNavbar: '<rect x="2" y="2" width="16" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="5" cy="4" r="1.5" fill="currentColor" opacity="0.6"/><line x1="8" y1="4" x2="10" y2="4" stroke="currentColor" stroke-width="1.2"/>',
-  LubanFooter: '<line x1="2" y1="2" x2="18" y2="2" stroke="currentColor" stroke-width="1.5"/><line x1="6" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.2"/><line x1="7" y1="9" x2="13" y2="9" stroke="currentColor" stroke-width="1.2"/>',
-  LubanFeatureGrid: '<rect x="2" y="2" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="2" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="2" y="9" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="9" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/>',
-  LubanPricing: '<rect x="2" y="4" width="14" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="4" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="1.2"/><line x1="6" y1="12" x2="12" y2="12" stroke="currentColor" stroke-width="1.3"/>',
-  LubanFAQ: '<circle cx="5" cy="5" r="1.2" fill="currentColor"/><line x1="8" y1="5" x2="16" y2="5" stroke="currentColor" stroke-width="1.2"/><circle cx="5" cy="10" r="1.2" fill="currentColor"/><line x1="8" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.2"/>',
-  LubanGallery: '<rect x="2" y="2" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="11" y="2" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="2" y="11" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/>',
-  LubanLogoCloud: '<circle cx="5" cy="5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="10" cy="5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="15" cy="5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/>',
-  LubanStats: '<rect x="2" y="10" width="4" height="8" rx="0.5" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="8" y="5" width="4" height="13" rx="0.5" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="14" y="7" width="4" height="11" rx="0.5" fill="none" stroke="currentColor" stroke-width="1.3"/>',
-  // 导航
-  LubanMenu: '<rect x="2" y="3" width="16" height="3" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="2" y="8" width="14" height="3" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="2" y="13" width="11" height="3" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/>',
-  LubanTabs: '<line x1="2" y1="3" x2="18" y2="3" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="6" width="5" height="2" rx="1" fill="currentColor"/><rect x="9" y="6" width="5" height="2" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/>',
-  // 反馈
-  LubanModal: '<rect x="2" y="4" width="16" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="13" y1="5" x2="17" y2="9" stroke="currentColor" stroke-width="1.5"/><line x1="17" y1="5" x2="13" y2="9" stroke="currentColor" stroke-width="1.5"/>',
-  LubanDrawer: '<rect x="2" y="2" width="12" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="16" y1="6" x2="18" y2="8" stroke="currentColor" stroke-width="1.5"/><line x1="18" y1="6" x2="16" y2="8" stroke="currentColor" stroke-width="1.5"/>',
-  LubanToast: '<rect x="5" y="8" width="10" height="6" rx="3" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="8" y1="11" x2="12" y2="11" stroke="currentColor" stroke-width="1.2"/>',
-  // 数据展示
-  LubanTable: '<rect x="2" y="2" width="16" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="2" y1="7" x2="18" y2="7" stroke="currentColor" stroke-width="1.2"/><line x1="8" y1="7" x2="8" y2="18" stroke="currentColor" stroke-width="1.2"/>',
+type DeviceType = 'pc' | 'tablet' | 'mobile';
+type EditorMode = 'design' | 'preview' | 'code';
+type MenuAction =
+  | 'copy'
+  | 'paste'
+  | 'delete'
+  | 'bring-front'
+  | 'send-back'
+  | 'move-up'
+  | 'move-down';
+
+// ===== 动态加载的 luban-low-code 模块 =====
+interface LubanLowCodeModule {
+  LubanDesigner: unknown;
+  DesignerToolbar: unknown;
+  PropertyPanel: unknown;
+  ComponentPanel: unknown;
+  OutlineTree: unknown;
+  ContextMenu: unknown;
+  CodeEditor: unknown;
+  useHistory: (initial: PageSchema) => {
+    current: { value: PageSchema };
+    push: (s: PageSchema) => void;
+    undo: () => void;
+    redo: () => void;
+    canUndo: { value: boolean };
+    canRedo: { value: boolean };
+    reset: (s: PageSchema) => void;
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getComponentMeta: (type: string) => any | undefined;
+  findNode: (root: NodeSchema, id: string) => NodeSchema | null;
+  findParent: (root: NodeSchema, childId: string) => NodeSchema | null;
+  removeNode: (root: NodeSchema, id: string) => boolean;
+  duplicateNode: (root: NodeSchema, id: string) => NodeSchema | null;
+  moveNode: (root: NodeSchema, id: string, direction: 'up' | 'down') => boolean;
+  insertNode: (root: NodeSchema, node: NodeSchema, parentId: string, index?: number) => boolean;
+  updateNodeProps: (root: NodeSchema, id: string, patch: Record<string, unknown>) => boolean;
+  bringToFront: (root: NodeSchema, id: string) => boolean;
+  sendToBack: (root: NodeSchema, id: string) => boolean;
+  genNodeId: (type: string) => string;
+  // T-ui-10：变体预设查表（来自 luban-low-code/snippets）
+  getSnippetById?: (id: string) =>
+    | {
+        id: string;
+        type: string;
+        name: string;
+        propsOverride: Record<string, unknown>;
+        children?: NodeSchema[];
+      }
+    | undefined;
 }
 
-function getComponentIcon(type: string): string {
-  return COMPONENT_ICONS[type] || '<rect x="4" y="4" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>'
+const route = useRoute();
+const router = useRouter();
+const siteId = computed(() => route.params.siteId as string);
+const pageId = computed(() => route.params.pageId as string);
+const isNew = computed(() => route.name === 'PageNew' || route.meta.isNew);
+
+// ===== 页面元数据 =====
+const pageName = ref('');
+const pagePath = ref('');
+const loading = ref(false);
+const saving = ref(false);
+const designerError = ref<string | null>(null);
+// ===== 发布状态（T8：顶栏发布/下线 + 状态标签） =====
+const pageStatus = ref<string>(''); // 'published' | 'draft' | '' (未加载/新建)
+const publishing = ref(false);
+const isPublished = computed(() => pageStatus.value === 'published');
+const isExisting = computed(() => !isNew.value && !!pageId.value);
+
+// ===== 动态加载的组件引用 =====
+const LubanDesignerC = shallowRef<unknown>(null);
+const DesignerToolbarC = shallowRef<unknown>(null);
+const PropertyPanelC = shallowRef<unknown>(null);
+const ComponentPanelC = shallowRef<unknown>(null);
+const OutlineTreeC = shallowRef<unknown>(null);
+const ContextMenuC = shallowRef<unknown>(null);
+const CodeEditorC = shallowRef<unknown>(null);
+
+// ===== luban-low-code 工具函数（加载后赋值） =====
+const llc = shallowRef<LubanLowCodeModule | null>(null);
+
+// ===== 设计器状态 =====
+const schema = ref<PageSchema | null>(null);
+const selectedNodeId = ref<string | null>(null);
+const designMode = ref(true); // 🔑 关键修复：设计模式默认开启
+const editorMode = ref<EditorMode>('design'); // design / preview / code
+const device = ref<DeviceType>('pc');
+const leftPanelCollapsed = ref(false);
+const rightPanelCollapsed = ref(false);
+
+// ===== AI 助手(M6) =====
+const aiPanelOpen = ref(false);
+function applyAiSchema(schemaJson: Record<string, unknown>) {
+  // AI 生成的 schema 应用到画布,走 onSchemaUpdate 入历史栈(可 Ctrl+Z 撤销)
+  const newSchema = {
+    ...(schema.value || { root: { id: 'root', type: 'LubanPage', children: [] } }),
+  };
+  newSchema.root = schemaJson.root as NodeSchema;
+  onSchemaUpdate(newSchema);
+  aiPanelOpen.value = false;
 }
+const aiChat = useAiChat({ siteId: () => siteId.value, pageId: () => pageId.value }, applyAiSchema);
 
-const selectedNode = computed<NodeSchema | null>(() => {
-  if (!schema.value?.root || !selectedId.value) return null
-  return findNode(schema.value.root, selectedId.value)
-})
+// ===== 历史栈（useHistory 加载后赋值） =====
+const history = ref<ReturnType<LubanLowCodeModule['useHistory']> | null>(null);
+const canUndo = computed(() => history.value?.canUndo.value ?? false);
+const canRedo = computed(() => history.value?.canRedo.value ?? false);
 
-const selectedMeta = computed(() => {
-  if (!selectedNode.value) return null
-  return getComponentMeta(selectedNode.value.type) ?? null
-})
+// ===== 右键菜单状态 =====
+const contextMenuVisible = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+const contextMenuNodeId = ref<string | null>(null);
 
-/** 当前页面发布状态徽标颜色。 */
-function statusTagType(status: string): 'success' | 'info' | 'warning' | 'danger' {
-  if (status === 'published') return 'success'
-  if (status === 'draft') return 'info'
-  return 'warning'
-}
+// ===== 剪贴板（用于 copy/paste） =====
+const clipboard = shallowRef<NodeSchema | null>(null);
 
-/** 给 ComponentTree 注入的 label 解析：优先用 meta.label，回退 type。 */
-function getLabel(node: NodeSchema): string {
-  return getComponentMeta(node.type)?.label ?? node.type
-}
+// ===== 当前选中的节点元数据（给 PropertyPanel） =====
+const selectedNodeMeta = computed(() => {
+  if (!schema.value || !selectedNodeId.value || !llc.value) return null;
+  const node = llc.value.findNode(schema.value.root, selectedNodeId.value);
+  if (!node) return null;
+  return llc.value.getComponentMeta(node.type) ?? null;
+});
 
+const selectedNodeProps = computed(() => {
+  if (!schema.value || !selectedNodeId.value) return {};
+  const node = llc.value?.findNode(schema.value.root, selectedNodeId.value);
+  return node?.props ?? {};
+});
+
+const selectedNodeStyle = computed(() => {
+  if (!schema.value || !selectedNodeId.value) return {};
+  const node = llc.value?.findNode(schema.value.root, selectedNodeId.value);
+  return (node?.style as Record<string, unknown>) ?? {};
+});
+
+// ===== 断点映射（device → breakpoint） =====
+const breakpoint = computed(() => {
+  if (device.value === 'mobile') return 'mobile' as const;
+  if (device.value === 'tablet') return 'tablet' as const;
+  return 'desktop' as const;
+});
+
+// ===== 画布宽度（设备预览） =====
+const canvasWidth = computed(() => {
+  if (device.value === 'mobile') return '375px';
+  if (device.value === 'tablet') return '768px';
+  return '100%';
+});
+
+// ===== 加载 luban-low-code 模块 =====
+onMounted(async () => {
+  try {
+    const m = (await import(/* @vite-ignore */ 'luban-low-code')) as unknown as LubanLowCodeModule;
+    llc.value = m;
+    LubanDesignerC.value = m.LubanDesigner;
+    DesignerToolbarC.value = m.DesignerToolbar;
+    PropertyPanelC.value = m.PropertyPanel;
+    ComponentPanelC.value = m.ComponentPanel;
+    OutlineTreeC.value = m.OutlineTree;
+    ContextMenuC.value = m.ContextMenu;
+    CodeEditorC.value = m.CodeEditor;
+
+    // 初始化历史栈（schema 加载后）
+    if (schema.value) {
+      history.value = m.useHistory(schema.value);
+    }
+  } catch {
+    designerError.value = '未安装 luban-low-code，无法使用页面设计器。';
+  }
+});
+
+// schema 加载后初始化历史栈
+watch(
+  schema,
+  (val) => {
+    if (val && llc.value && !history.value) {
+      history.value = llc.value.useHistory(val);
+    }
+  },
+  { immediate: false },
+);
+
+// ===== 注册全局快捷键 =====
+useDesignerKeyboard({
+  undo: () => doUndo(),
+  redo: () => doRedo(),
+  canUndo,
+  canRedo,
+  selectedNodeId,
+  onDelete: () => deleteSelected(),
+  onCopy: () => copySelected(),
+  onDuplicate: () => duplicateSelected(),
+  onSave: () => handleSave(),
+  onEsc: () => {
+    selectedNodeId.value = null;
+    contextMenuVisible.value = false;
+  },
+});
+
+// ===== 页面加载 =====
 async function loadPage() {
-  if (!siteId.value || (isNew.value ? false : !pageId.value)) return
-  loading.value = true
-  loadError.value = null
+  if (!siteId.value || (isNew.value ? false : !pageId.value)) return;
+  loading.value = true;
   try {
     if (isNew.value) {
-      pageName.value = ''
-      pagePath.value = ''
-      pageStatus.value = 'draft'
-      pageSeo.value = {}
-      // V2-T3：优先从 router state 读取模板 schema（PageList 选模板后传入）
-      const tplSchemaRaw = typeof window !== 'undefined' ? window.history.state?.templateSchema : undefined
-      const tplName = typeof window !== 'undefined' ? window.history.state?.templateName : undefined
-      if (tplSchemaRaw) {
-        try {
-          schema.value = JSON.parse(tplSchemaRaw) as PageSchema
-        } catch {
-          schema.value = {
-            root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
-          }
-        }
-      } else {
-        schema.value = {
-          root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
-        }
-      }
-      // 模板名预填页面名（用户可改）
-      if (tplName) pageName.value = tplName
+      pageName.value = '';
+      pagePath.value = '';
+      pageStatus.value = '';
+      schema.value = {
+        root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
+      };
     } else {
-      const { data } = await getPage(siteId.value, pageId.value)
-      pageName.value = data.name
-      pagePath.value = data.path
-      pageStatus.value = data.status ?? 'draft'
-      pageSeo.value = data.seo ?? data.schema?.seo ?? {}
+      const { data } = await getPage(siteId.value, pageId.value);
+      pageName.value = data.name;
+      pagePath.value = data.path;
+      pageStatus.value = data.status ?? 'draft';
       schema.value = data.schema ?? {
         root: { id: 'root', type: 'LubanContainer', props: {}, children: [] },
-      }
+      };
     }
-    // R4a: clear the undo/redo stack on page switch so Ctrl+Z can't cross into
-    // the previous page's schema (data-safety: history is per-page, not global).
-    history.reset()
-  } catch (e) {
-    // 不再静默回退；记录错误供 UI 显示重试卡片。
-    loadError.value = (e as Error)?.message || '加载页面失败'
-    schema.value = null
+  } catch {
+    schema.value = { root: { id: 'root', type: 'LubanContainer', props: {}, children: [] } };
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
-/** V2-T2 SEO 更新：写 pageSeo + 同步 schema.seo（保证 schema 自洽） */
-function onUpdateSeo(seo: PageSeo): void {
-  pageSeo.value = seo
-  if (schema.value) {
-    schema.value.seo = seo
+// ===== schema 变更 → 同步到 history（debounce 500ms，避免连续 @input 过多快照）=====
+let historyTimer: ReturnType<typeof setTimeout> | null = null;
+function onSchemaUpdate(newSchema: PageSchema | null) {
+  if (!newSchema) return;
+  schema.value = newSchema;
+  // 推入历史栈（undo/redo 时跳过，避免循环；debounce 避免连续输入过多快照）
+  if (history.value && !isUndoRedoing.value) {
+    if (historyTimer) clearTimeout(historyTimer);
+    historyTimer = setTimeout(() => {
+      history.value!.push(JSON.parse(JSON.stringify(schema.value)));
+      historyTimer = null;
+    }, 500);
   }
 }
 
+// ===== 选中节点 =====
+function onSelectNode(nodeId: string | null) {
+  selectedNodeId.value = nodeId;
+}
+
+// ===== 从组件库添加节点 =====
+function onAddNode(type: string, parentId?: string) {
+  if (!schema.value || !llc.value) return;
+  const meta = llc.value.getComponentMeta(type);
+  const newNode: NodeSchema = {
+    id: llc.value.genNodeId(type),
+    type,
+    props: meta?.defaultProps ? JSON.parse(JSON.stringify(meta.defaultProps)) : {},
+    children: [],
+  };
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  const targetParentId = parentId ?? 'root';
+  llc.value.insertNode(root, newNode, targetParentId);
+  const newSchema = { ...schema.value, root };
+  onSchemaUpdate(newSchema);
+  // 自动选中新节点
+  selectedNodeId.value = newNode.id;
+}
+
+/**
+ * T-ui-10：添加变体预设节点。
+ * 查表 snippet，把 defaultProps + propsOverride 合并为节点 props，
+ * snippet.children 作为预置子节点（各自分配 id）。
+ */
+function onAddSnippet(snippetId: string) {
+  if (!schema.value || !llc.value || !llc.value.getSnippetById) return;
+  const snippet = llc.value.getSnippetById(snippetId);
+  if (!snippet) return;
+  const meta = llc.value.getComponentMeta(snippet.type);
+  const baseProps = meta?.defaultProps ? JSON.parse(JSON.stringify(meta.defaultProps)) : {};
+  const newNode: NodeSchema = {
+    id: llc.value.genNodeId(snippet.type),
+    type: snippet.type,
+    // 合并：物料默认值 ← 变体覆盖
+    props: { ...baseProps, ...JSON.parse(JSON.stringify(snippet.propsOverride)) },
+    // 变体预置子节点：深拷贝并分配新 id（避免 id 冲突）
+    children: snippet.children
+      ? JSON.parse(JSON.stringify(snippet.children)).map((c: NodeSchema) => ({
+          ...c,
+          id: llc.value!.genNodeId(c.type),
+        }))
+      : [],
+  };
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  llc.value.insertNode(root, newNode, 'root');
+  const newSchema = { ...schema.value, root };
+  onSchemaUpdate(newSchema);
+  selectedNodeId.value = newNode.id;
+}
+
+// ===== 属性面板 patch 回写 =====
+function onPropUpdate(patch: Record<string, unknown>) {
+  if (!schema.value || !selectedNodeId.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  llc.value.updateNodeProps(root, selectedNodeId.value, patch);
+  onSchemaUpdate({ ...schema.value, root });
+}
+
+function onStyleUpdate(patch: Record<string, unknown>) {
+  if (!schema.value || !selectedNodeId.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  const node = llc.value.findNode(root, selectedNodeId.value);
+  if (node) {
+    node.style = { ...(node.style ?? {}), ...patch };
+  }
+  onSchemaUpdate({ ...schema.value, root });
+}
+
+// ===== 撤销/重做 =====
+const isUndoRedoing = ref(false);
+
+// ===== 协作远端更新标志（防回环：远端推来的变更不再广播回远端） =====
+const isRemoteUpdate = ref(false);
+
+// ===== 数据源管理弹窗 =====
+const dsManageVisible = ref(false);
+
+function doUndo() {
+  if (!history.value) return;
+  history.value.undo();
+  if (history.value.current.value) {
+    isUndoRedoing.value = true;
+    schema.value = JSON.parse(JSON.stringify(history.value.current.value));
+    nextTick(() => {
+      isUndoRedoing.value = false;
+    });
+  }
+}
+
+function doRedo() {
+  if (!history.value) return;
+  history.value.redo();
+  if (history.value.current.value) {
+    isUndoRedoing.value = true;
+    schema.value = JSON.parse(JSON.stringify(history.value.current.value));
+    nextTick(() => {
+      isUndoRedoing.value = false;
+    });
+  }
+}
+
+// ===== 复制/粘贴/克隆/删除 =====
+function copySelected() {
+  if (!schema.value || !selectedNodeId.value || !llc.value) return;
+  const node = llc.value.findNode(schema.value.root, selectedNodeId.value);
+  if (node) {
+    clipboard.value = JSON.parse(JSON.stringify(node));
+  }
+}
+
+function pasteNode() {
+  if (!schema.value || !clipboard.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  const newNode = JSON.parse(JSON.stringify(clipboard.value)) as NodeSchema;
+  newNode.id = llc.value.genNodeId(newNode.type);
+  llc.value.insertNode(root, newNode, 'root');
+  onSchemaUpdate({ ...schema.value, root });
+  selectedNodeId.value = newNode.id;
+}
+
+function duplicateSelected() {
+  if (!schema.value || !selectedNodeId.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  const cloned = llc.value.duplicateNode(root, selectedNodeId.value);
+  if (cloned) {
+    onSchemaUpdate({ ...schema.value, root });
+    selectedNodeId.value = cloned.id;
+  }
+}
+
+function deleteSelected() {
+  if (!schema.value || !selectedNodeId.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  llc.value.removeNode(root, selectedNodeId.value);
+  onSchemaUpdate({ ...schema.value, root });
+  selectedNodeId.value = null;
+}
+
+function deleteNode(nodeId: string) {
+  if (!schema.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  llc.value.removeNode(root, nodeId);
+  onSchemaUpdate({ ...schema.value, root });
+  if (selectedNodeId.value === nodeId) selectedNodeId.value = null;
+}
+
+function duplicateNode(nodeId: string) {
+  if (!schema.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  const cloned = llc.value.duplicateNode(root, nodeId);
+  if (cloned) {
+    onSchemaUpdate({ ...schema.value, root });
+  }
+}
+
+function moveNodeReorder(nodeId: string, direction: 'up' | 'down') {
+  if (!schema.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  llc.value.moveNode(root, nodeId, direction);
+  onSchemaUpdate({ ...schema.value, root });
+}
+
+// ===== 跨容器移动节点 =====
+function onMoveNode(
+  nodeId: string,
+  _fromParentId: string | null,
+  toParentId: string | null,
+  toIndex: number,
+) {
+  if (!schema.value || !llc.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  const node = llc.value.findNode(root, nodeId);
+  if (!node) return;
+  // 先从原位置移除
+  llc.value.removeNode(root, nodeId);
+  // 插入到目标父节点
+  const targetParent = toParentId ? llc.value.findNode(root, toParentId) : root;
+  if (targetParent) {
+    if (!targetParent.children) targetParent.children = [];
+    targetParent.children.splice(toIndex, 0, JSON.parse(JSON.stringify(node)));
+  }
+  onSchemaUpdate({ ...schema.value, root });
+}
+
+// ===== root 级重排 =====
+function onReorder(fromIndex: number, toIndex: number) {
+  if (!schema.value) return;
+  const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+  if (!root.children) return;
+  const [moved] = root.children.splice(fromIndex, 1);
+  root.children.splice(toIndex, 0, moved);
+  onSchemaUpdate({ ...schema.value, root });
+}
+
+// ===== 右键菜单 =====
+function onContextMenu(x: number, y: number, nodeId: string) {
+  contextMenuX.value = x;
+  contextMenuY.value = y;
+  contextMenuNodeId.value = nodeId;
+  selectedNodeId.value = nodeId;
+  contextMenuVisible.value = true;
+}
+
+function onContextMenuAction(action: MenuAction) {
+  contextMenuVisible.value = false;
+  const nodeId = contextMenuNodeId.value;
+  if (!nodeId) return;
+  switch (action) {
+    case 'copy':
+      copySelected();
+      break;
+    case 'paste':
+      pasteNode();
+      break;
+    case 'delete':
+      deleteNode(nodeId);
+      break;
+    case 'bring-front':
+      if (schema.value && llc.value) {
+        const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+        llc.value.bringToFront(root, nodeId);
+        onSchemaUpdate({ ...schema.value!, root });
+      }
+      break;
+    case 'send-back':
+      if (schema.value && llc.value) {
+        const root = JSON.parse(JSON.stringify(schema.value.root)) as NodeSchema;
+        llc.value.sendToBack(root, nodeId);
+        onSchemaUpdate({ ...schema.value!, root });
+      }
+      break;
+    case 'move-up':
+      moveNodeReorder(nodeId, 'up');
+      break;
+    case 'move-down':
+      moveNodeReorder(nodeId, 'down');
+      break;
+  }
+}
+
+// ===== 工具栏事件 =====
+function onToolbarUndo() {
+  doUndo();
+}
+function onToolbarRedo() {
+  doRedo();
+}
+function onToolbarDevice(d: DeviceType) {
+  device.value = d;
+}
+function onToolbarMode(m: EditorMode) {
+  editorMode.value = m;
+  // 预览模式关闭 designMode
+  designMode.value = m === 'design';
+}
+function onToolbarSave() {
+  handleSave();
+}
+
+// ===== CodeEditor 双向绑定 =====
+function onCodeUpdate(newSchema: PageSchema) {
+  onSchemaUpdate(newSchema);
+}
+
+// ===== 保存 =====
 async function handleSave() {
-  if (!schema.value || !siteId.value) return
+  if (!schema.value || !siteId.value) return;
   if (!pageName.value || !pagePath.value) {
-    ElMessage.warning('请填写页面名称和路径')
-    return
+    ElMessage.warning('请填写页面名称和路径');
+    return;
   }
-  saving.value = true
+  saving.value = true;
   try {
     if (isNew.value) {
       const { data } = await createPage(siteId.value, {
         name: pageName.value,
         path: pagePath.value,
         schema: schema.value,
-        seo: pageSeo.value,
-      })
-      ElMessage.success('创建成功')
-      router.replace(`/sites/${siteId.value}/pages/${data.id}`)
+      });
+      ElMessage.success('创建成功');
+      pageStatus.value = data.status ?? 'draft';
+      router.replace(`/sites/${siteId.value}/pages/${data.id}`);
     } else {
       await savePage(siteId.value, pageId.value, {
         name: pageName.value,
         path: pagePath.value,
         schema: schema.value,
-        seo: pageSeo.value,
-      })
-      ElMessage.success('保存成功')
+      });
+      ElMessage.success('保存成功');
     }
   } catch (e) {
-    ElMessage.error((e as Error).message || '保存失败')
+    ElMessage.error((e as Error).message || '保存失败');
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 
+// ===== 发布 / 下线 / 草稿预览（T8） =====
 async function handlePublish() {
-  if (!schema.value || !siteId.value || !pageId.value || isNew.value) {
-    ElMessage.warning('请先保存页面再发布')
-    return
+  if (!siteId.value || !pageId.value) return;
+  // 发布前确保最新内容已保存：若 schema 有未保存改动（canUndo 成立），先保存。
+  // 这样避免「发布的是旧快照」。
+  if (canUndo.value) {
+    await handleSave();
   }
-  if (!pageName.value || !pagePath.value) {
-    ElMessage.warning('请填写页面名称和路径')
-    return
-  }
+  publishing.value = true;
   try {
-    await ElMessageBox.confirm(
-      `确认发布页面「${pageName.value}」？发布后访问者将看到最新内容。`,
-      '发布确认',
-      { type: 'warning', confirmButtonText: '发布', cancelButtonText: '取消' }
-    )
-  } catch {
-    // 用户取消
-    return
-  }
-  publishing.value = true
-  try {
-    const { data } = await publishPage(siteId.value, pageId.value, {
-      name: pageName.value,
-      path: pagePath.value,
-      schema: schema.value,
-      seo: pageSeo.value,
-    })
-    pageStatus.value = data?.status ?? 'published'
-    ElMessage.success('发布成功')
+    const { data } = await publishPage(siteId.value, pageId.value);
+    pageStatus.value = data.status ?? 'published';
+    ElMessage.success('发布成功');
   } catch (e) {
-    ElMessage.error((e as Error).message || '发布失败')
+    ElMessage.error((e as Error).message || '发布失败');
   } finally {
-    publishing.value = false
+    publishing.value = false;
   }
+}
+
+async function handleUnpublish() {
+  if (!siteId.value || !pageId.value) return;
+  publishing.value = true;
+  try {
+    const { data } = await unpublishPage(siteId.value, pageId.value);
+    pageStatus.value = data.status ?? 'draft';
+    ElMessage.success('已下线');
+  } catch (e) {
+    ElMessage.error((e as Error).message || '下线失败');
+  } finally {
+    publishing.value = false;
+  }
+}
+
+/** 打开草稿预览（访客视角预览当前未发布内容，新标签页） */
+function openDraftPreview() {
+  if (!siteId.value || !pageId.value) return;
+  const routeData = router.resolve({
+    path: `/sites/${siteId.value}/pages/${pageId.value}/preview`,
+  });
+  window.open(routeData.href, '_blank');
 }
 
 function goBack() {
-  router.push(`/sites/${siteId.value}/pages`)
+  router.push(`/sites/${siteId.value}/pages`);
 }
 
-// === LubanDesigner / 组件树事件 ===
-// 所有 schema mutation 已收口到 usePageEditorApi（api.*）。
-// 模板事件绑定直接委托 api.select/addNode/reorder/moveNode/updateProp/updateEvent/
-// updateDatasource/deleteNode/duplicateNode/move（见 template）。
+// ===== 协作 CRDT 接线（useCollab 桥接） =====
+const {
+  status: collabStatus,
+  onlineUsers: collabOnlineUsers,
+  remoteSchema,
+  broadcastLocal,
+} = useCollab({
+  bffBase: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
+  siteId: siteId.value,
+  pageId: pageId.value,
+  token: getToken() ?? '',
+  username: getUsername(),
+  initialSchema: schema.value,
+  enabled: true,
+});
 
-// === 物料拖拽（左侧 → 画布） ===
+// 远端 schema → 本地（防回环：置标志 → 写回 → nextTick 复位）
+watch(remoteSchema, (val) => {
+  if (!val) return;
+  isRemoteUpdate.value = true;
+  onSchemaUpdate(val);
+  nextTick(() => {
+    isRemoteUpdate.value = false;
+  });
+});
 
-function onPaletteDragStart(e: DragEvent, type: string): void {
-  if (!e.dataTransfer) return
-  e.dataTransfer.effectAllowed = 'copy'
-  e.dataTransfer.setData('application/json', JSON.stringify({ type }))
-}
-
-async function loadDatasources() {
-  if (!siteId.value) return
-  try {
-    const { data } = await getDatasources(siteId.value)
-    datasources.value = (data ?? []).map((d) => ({ id: d.id, name: d.name }))
-  } catch {
-    datasources.value = []
+// 本地 schema → 远端（仅在非远端更新、非 undo/redo 时广播）
+watch(schema, (val) => {
+  if (!val) return;
+  if (!isRemoteUpdate.value && !isUndoRedoing.value) {
+    broadcastLocal(val);
   }
-}
+});
 
-onMounted(() => {
-  loadPage()
-  loadDatasources()
-})
-watch([siteId, pageId], loadPage)
-watch(siteId, loadDatasources)
+onMounted(loadPage);
+watch([siteId, pageId], loadPage);
 </script>
 
 <template>
-  <div class="page-editor" :class="{ 'page-editor--designer': isDesignerMode }" v-loading="loading">
-    <!-- 顶部 meta + 操作（标准模式） -->
-    <ElCard v-if="!isDesignerMode" class="page-editor__meta" shadow="never">
-      <ElForm inline>
-        <ElFormItem label="页面名称">
-          <ElInput v-model="pageName" placeholder="名称" style="width: 200px" />
-        </ElFormItem>
-        <ElFormItem label="路径">
-          <ElInput v-model="pagePath" placeholder="/page-path" style="width: 200px" />
-        </ElFormItem>
-        <ElFormItem>
-          <ElTag :type="statusTagType(pageStatus)" size="small">
-            {{ pageStatus === 'published' ? '已发布' : '草稿' }}
+  <div v-loading="loading" class="page-editor">
+    <!-- 加载错误 -->
+    <div v-if="designerError" class="page-editor__error-banner">
+      <p>{{ designerError }}</p>
+      <p v-if="schema" class="hint">当前 Schema 已加载，保存时将一并提交。</p>
+    </div>
+
+    <!-- 完整 IDE 布局 -->
+    <div v-else-if="schema" class="page-editor__ide">
+      <!-- ===== 顶栏 ===== -->
+      <header class="page-editor__topbar">
+        <!-- 左侧：返回 + 页面元信息 -->
+        <div class="page-editor__meta-left">
+          <ElButton text @click="goBack">← 返回</ElButton>
+          <ElInput v-model="pageName" placeholder="页面名称" class="meta-input" />
+          <ElInput v-model="pagePath" placeholder="/path" class="meta-input meta-path" />
+          <ElButton text @click="dsManageVisible = true">数据源</ElButton>
+        </div>
+
+        <!-- 中间：DesignerToolbar（撤销/重做/设备/模式） -->
+        <div v-if="DesignerToolbarC" class="page-editor__toolbar">
+          <component
+            :is="DesignerToolbarC"
+            :can-undo="canUndo"
+            :can-redo="canRedo"
+            :device="device"
+            :mode="editorMode"
+            :saving="saving"
+            :collab-enabled="true"
+            :collab-users="collabOnlineUsers"
+            :collab-status="collabStatus"
+            @undo="onToolbarUndo"
+            @redo="onToolbarRedo"
+            @switch-device="onToolbarDevice"
+            @switch-mode="onToolbarMode"
+            @save="onToolbarSave"
+          />
+        </div>
+
+        <!-- 右侧：状态标签 + 草稿预览 + 发布/下线 + 保存 -->
+        <div class="page-editor__meta-right">
+          <!-- AI 助手按钮(M6) -->
+          <ElButton
+            type="primary"
+            plain
+            size="small"
+            class="meta-ai-btn"
+            @click="aiPanelOpen = true"
+          >
+            ✨ AI
+          </ElButton>
+          <!-- 状态标签（已发布/草稿） -->
+          <ElTag
+            v-if="isExisting"
+            :type="isPublished ? 'success' : 'info'"
+            size="small"
+            class="meta-status-tag"
+          >
+            {{ isPublished ? '已发布' : '草稿' }}
           </ElTag>
-        </ElFormItem>
-        <ElFormItem v-if="featureUndo">
-          <ElButton
-            :disabled="!canUndo"
-            title="撤销 (Ctrl+Z)"
-            @click="history.undo()"
-          >
-            ↶ 撤销
+          <!-- 草稿预览（访客视角预览未发布内容） -->
+          <ElButton v-if="isExisting" text class="meta-preview-btn" @click="openDraftPreview">
+            预览
           </ElButton>
+          <!-- 发布 / 下线（仅已存在的页面） -->
           <ElButton
-            :disabled="!canRedo"
-            title="重做 (Ctrl+Shift+Z / Ctrl+Y)"
-            @click="history.redo()"
-          >
-            ↷ 重做
-          </ElButton>
-          <ElButton
-            :disabled="!canUndo"
-            title="撤销 (Ctrl+Z)"
-            @click="history.undo()"
-          >
-            ↶ 撤销
-          </ElButton>
-          <ElButton
-            :disabled="!canRedo"
-            title="重做 (Ctrl+Shift+Z / Ctrl+Y)"
-            @click="history.redo()"
-          >
-            ↷ 重做
-          </ElButton>
-          <ElButton
-            :type="isDesign ? 'default' : 'primary'"
-            @click="isDesign = !isDesign"
-          >
-            {{ isDesign ? '预览' : '回到设计' }}
-          </ElButton>
-          <ElButton type="primary" :loading="saving" @click="handleSave">
-            {{ isNew ? '创建' : '保存' }}
-          </ElButton>
-          <ElButton
+            v-if="isExisting && !isPublished"
             type="success"
             :loading="publishing"
-            :disabled="isNew"
             @click="handlePublish"
           >
             发布
           </ElButton>
-          <ElButton @click="goBack">返回列表</ElButton>
-          <!-- AI 助手入口（FeatureGate ai.assistant 关则隐藏，编辑器回归原状 plan §6.5） -->
-          <ElButton
-            v-if="featureAiAssistant"
-            type="primary"
-            plain
-            title="AI 助手：自然语言生成/编辑页面"
-            @click="aiPanelOpen = true"
-          >
-            ✨ AI 助手
+          <ElButton v-if="isExisting && isPublished" :loading="publishing" @click="handleUnpublish">
+            下线
           </ElButton>
-        </ElFormItem>
-      </ElForm>
-    </ElCard>
-
-    <!-- 全屏设计器顶栏（浮动） -->
-    <div v-if="isDesignerMode" class="page-editor__designer-bar">
-      <div class="page-editor__designer-bar-left">
-        <ElButton text @click="goBack">← 返回页面列表</ElButton>
-        <span class="page-editor__designer-title">{{ pageName || '未命名页面' }}</span>
-        <ElTag :type="statusTagType(pageStatus)" size="small">
-          {{ pageStatus === 'published' ? '已发布' : '草稿' }}
-        </ElTag>
-      </div>
-      <div class="page-editor__designer-bar-center">
-        <!-- V2-T11 多选批量操作栏（选中 ≥2 显示） -->
-        <div v-if="multiSelectEnabled && selectedIds.length > 1" class="page-editor__multiselect-bar">
-          <ElTag size="small" type="info">已选 {{ selectedIds.length }}</ElTag>
-          <ElButton size="small" @click="onBatchDuplicate">复制</ElButton>
-          <ElButton size="small" @click="onBatchAlign('left')">左对齐</ElButton>
-          <ElButton size="small" @click="onBatchAlign('center')">居中</ElButton>
-          <ElButton size="small" type="danger" @click="onBatchDelete">删除</ElButton>
-          <ElButton size="small" text @click="onClearSelection">取消选择</ElButton>
+          <ElButton type="primary" :loading="saving" @click="handleSave">保存</ElButton>
         </div>
-        <ElButton v-else-if="multiSelectEnabled && selectedId && selectedId !== schema?.root?.id" size="small" text @click="onSelectAllSiblings">全选同级</ElButton>
-        <!-- V2-T4 断点切换器 -->
-        <div v-if="responsiveEnabled" class="page-editor__breakpoints">
-          <ElButton
-            size="small"
-            :type="currentBreakpoint === 'desktop' ? 'primary' : 'default'"
-            title="桌面端 (desktop)"
-            @click="setBreakpoint('desktop')"
-          >💻 桌面</ElButton>
-          <ElButton
-            size="small"
-            :type="currentBreakpoint === 'tablet' ? 'primary' : 'default'"
-            title="平板端 (tablet, 768px)"
-            @click="setBreakpoint('tablet')"
-          >📱 平板</ElButton>
-          <ElButton
-            size="small"
-            :type="currentBreakpoint === 'mobile' ? 'primary' : 'default'"
-            title="手机端 (mobile, 375px)"
-            @click="setBreakpoint('mobile')"
-          >📱 手机</ElButton>
-        </div>
-        <span v-else class="page-editor__designer-path">{{ pagePath || '/' }}</span>
-      </div>
-      <div class="page-editor__designer-bar-right">
-        <ElButton size="small" :disabled="!canUndo" title="撤销 (Ctrl+Z)" @click="history.undo()">↶</ElButton>
-        <ElButton size="small" :disabled="!canRedo" title="重做 (Ctrl+Shift+Z)" @click="history.redo()">↷</ElButton>
-        <ElButton size="small" :type="isDesign ? 'default' : 'primary'" @click="isDesign = !isDesign">
-          {{ isDesign ? '预览' : '设计' }}
-        </ElButton>
-        <!-- V2-T8 版本历史入口 -->
-        <ElButton
-          v-if="versionHistoryEnabled"
-          size="small"
-          :disabled="isNew"
-          title="版本历史与回滚"
-          @click="versionHistoryVisible = true"
-        >历史</ElButton>
-        <!-- V2-T9 出码导出入口（下拉：单文件 / 多文件包） -->
-        <ElDropdown v-if="exportEnabled" trigger="click" @command="(cmd: string) => cmd === 'package' ? onExportPackage() : onExportHtml()">
-          <ElButton size="small" title="导出静态页">导出 ▾</ElButton>
-          <template #dropdown>
-            <ElDropdownMenu>
-              <ElDropdownItem command="html">单文件 HTML（内联，推荐）</ElDropdownItem>
-              <ElDropdownItem command="package">多文件包（index.html + assets/）</ElDropdownItem>
-            </ElDropdownMenu>
-          </template>
-        </ElDropdown>
-        <ElButton size="small" type="primary" :loading="saving" @click="handleSave">
-          {{ isNew ? '创建' : '保存' }}
-        </ElButton>
-        <ElButton size="small" type="success" :loading="publishing" :disabled="isNew" @click="handlePublish">
-          发布
-        </ElButton>
-      </div>
-    </div>
+      </header>
 
-    <!-- 错误态：加载失败不再静默 -->
-    <ElCard v-if="loadError" class="page-editor__error-card" shadow="never">
-      <p class="page-editor__error">{{ loadError }}</p>
-      <ElButton type="primary" @click="loadPage">重试</ElButton>
-    </ElCard>
-
-    <!-- 三栏工作区 -->
-    <ElContainer v-else-if="schema" class="page-editor__workspace">
-      <ElAside width="240px" class="page-editor__aside page-editor__palette">
-        <div class="page-editor__panel-title">组件</div>
-        <!-- 搜索框 -->
-        <div class="page-editor__palette-search">
-          <input
-            v-model="paletteSearch"
-            class="page-editor__palette-search-input"
-            placeholder="搜索组件..."
-          />
-        </div>
-        <!-- 分类列表 -->
-        <div class="page-editor__palette-body">
-          <div
-            v-for="group in filteredPaletteGroups"
-            :key="group.category"
-            class="page-editor__palette-group"
+      <!-- ===== 主体三栏 ===== -->
+      <div class="page-editor__body">
+        <!-- 左栏：组件库 -->
+        <aside
+          class="page-editor__left"
+          :class="{ 'page-editor__left--collapsed': leftPanelCollapsed }"
+        >
+          <button
+            class="page-editor__collapse-btn"
+            :title="leftPanelCollapsed ? '展开组件库' : '收起组件库'"
+            @click="leftPanelCollapsed = !leftPanelCollapsed"
           >
-            <button
-              class="page-editor__palette-cat"
-              @click="toggleCategory(group.category)"
-            >
-              <svg class="page-editor__palette-cat-arrow" :class="{ 'page-editor__palette-cat-arrow--open': !collapsedCategories.has(group.category) }" viewBox="0 0 16 16" width="12" height="12">
-                <path d="M6 4 L10 8 L6 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              </svg>
-              <span>{{ group.category }}</span>
-              <span class="page-editor__palette-cat-count">{{ group.items.length }}</span>
-            </button>
-            <div v-show="!collapsedCategories.has(group.category)" class="page-editor__palette-items">
-              <div
-                v-for="item in group.items"
-                :key="item.type"
-                class="page-editor__palette-item"
-                draggable="true"
-                @dragstart="(e) => onPaletteDragStart(e, item.type)"
-              >
-                <span class="page-editor__palette-item-icon-text">{{ item.label.charAt(0) }}</span>
-                <span class="page-editor__palette-item-label">{{ item.label }}</span>
-              </div>
+            {{ leftPanelCollapsed ? '▶' : '◀' }}
+          </button>
+          <div v-if="!leftPanelCollapsed && ComponentPanelC" class="page-editor__component-panel">
+            <component
+              :is="ComponentPanelC"
+              @add-node="(type: string) => onAddNode(type)"
+              @add-snippet="(snippetId: string) => onAddSnippet(snippetId)"
+            />
+          </div>
+        </aside>
+
+        <!-- 中间：画布 -->
+        <main class="page-editor__canvas-area">
+          <div class="page-editor__canvas-wrapper" :style="{ maxWidth: canvasWidth }">
+            <!-- 设计/预览模式：LubanDesigner -->
+            <component
+              :is="LubanDesignerC"
+              v-if="LubanDesignerC && editorMode !== 'code'"
+              v-model:schema="schema"
+              v-model:selected-node-id="selectedNodeId"
+              :design-mode="designMode"
+              :breakpoint="breakpoint"
+              :show-toolbar="false"
+              placeholder="从左侧拖拽组件到此处"
+              @add-node="(type: string, parentId?: string) => onAddNode(type, parentId)"
+              @select="(id: string | null) => onSelectNode(id)"
+              @copy="
+                (id: string) => {
+                  selectedNodeId = id;
+                  copySelected();
+                }
+              "
+              @delete="(id: string) => deleteNode(id)"
+              @reorder="(from: number, to: number) => onReorder(from, to)"
+              @move-node="
+                (id: string, from: string | null, to: string | null, idx: number) =>
+                  onMoveNode(id, from, to, idx)
+              "
+              @move-up="(id: string) => moveNodeReorder(id, 'up')"
+              @move-down="(id: string) => moveNodeReorder(id, 'down')"
+              @add-snippet="(snippetId: string) => onAddSnippet(snippetId)"
+              @context-menu="(x: number, y: number, id: string) => onContextMenu(x, y, id)"
+            />
+            <!-- 代码模式：CodeEditor -->
+            <component
+              :is="CodeEditorC"
+              v-else-if="CodeEditorC && editorMode === 'code'"
+              :model-value="schema"
+              @update:model-value="(val: PageSchema) => onCodeUpdate(val)"
+            />
+          </div>
+        </main>
+
+        <!-- 右栏：属性面板 + 大纲树 -->
+        <aside
+          class="page-editor__right"
+          :class="{ 'page-editor__right--collapsed': rightPanelCollapsed }"
+        >
+          <button
+            class="page-editor__collapse-btn"
+            :title="rightPanelCollapsed ? '展开属性面板' : '收起属性面板'"
+            @click="rightPanelCollapsed = !rightPanelCollapsed"
+          >
+            {{ rightPanelCollapsed ? '◀' : '▶' }}
+          </button>
+          <div v-if="!rightPanelCollapsed" class="page-editor__right-content">
+            <!-- 属性面板（上半） -->
+            <div v-if="PropertyPanelC" class="page-editor__property-panel">
+              <component
+                :is="PropertyPanelC"
+                :node-meta="selectedNodeMeta"
+                :model-value="selectedNodeProps"
+                :style-value="selectedNodeStyle"
+                @update:model-value="(patch: Record<string, unknown>) => onPropUpdate(patch)"
+                @update:style-value="(patch: Record<string, unknown>) => onStyleUpdate(patch)"
+              />
+            </div>
+            <!-- 大纲树（下半） -->
+            <div v-if="OutlineTreeC" class="page-editor__outline-tree">
+              <div class="page-editor__panel-title">大纲</div>
+              <component
+                :is="OutlineTreeC"
+                :schema="schema"
+                :selected-id="selectedNodeId"
+                @select="(id: string) => onSelectNode(id)"
+                @delete="(id: string) => deleteNode(id)"
+                @duplicate="(id: string) => duplicateNode(id)"
+                @reorder="(id: string, dir: 'up' | 'down') => moveNodeReorder(id, dir)"
+              />
             </div>
           </div>
-          <div v-if="filteredPaletteGroups.length === 0" class="page-editor__palette-empty">
-            未找到匹配的组件
-          </div>
-        </div>
-      </ElAside>
+        </aside>
+      </div>
 
-      <ElMain class="page-editor__main">
-        <div class="page-editor__canvas-wrap" :style="{ maxWidth: canvasWidth }">
-        <LubanDesigner
-          v-if="isDesign"
-          v-model:schema="schema"
-          :design-mode="true"
-          :show-toolbar="false"
-          :breakpoint="currentBreakpoint"
-          placeholder="从左侧拖拽组件到此处"
-          @select="api.select"
-          @add-node="api.addNode"
-          @reorder="api.reorder"
-          @move-node="api.moveNode"
-        />
-        <LubanPage v-else :schema="schema" :datasource-fetcher="datasourceFetcher" />
-      </ElMain>
+      <!-- ===== 右键菜单 ===== -->
+      <component
+        :is="ContextMenuC"
+        v-if="ContextMenuC"
+        :visible="contextMenuVisible"
+        :x="contextMenuX"
+        :y="contextMenuY"
+        :can-paste="!!clipboard"
+        @action="(a: MenuAction) => onContextMenuAction(a)"
+        @close="contextMenuVisible = false"
+      />
 
-      <ElAside width="300px" class="page-editor__aside page-editor__right">
-        <ComponentTree
-          :schema="schema"
-          :selected-id="selectedId"
-          :get-label="getLabel"
-          @select="api.select"
-          @delete="api.deleteNode"
-          @move="api.move"
-        />
-        <div class="page-editor__right-divider" />
-        <PropertyPanel
-          :node="selectedNode"
-          :meta="selectedMeta"
-          :datasources="datasources"
-          @update:prop="api.updateProp"
-          @update:event="api.updateEvent"
-          @update:datasource="api.updateDatasource"
-          @delete="api.deleteNode"
-          @duplicate="api.duplicateNode"
-        />
-      </ElAside>
-    </ElContainer>
+      <!-- 数据源管理弹窗 -->
+      <DatasourceManageDialog v-model="dsManageVisible" :site-id="siteId" @change="loadPage" />
 
-    <!-- AI 助手右侧抽屉浮层（零侵入：不破坏三栏 flex，叠加在右侧 ElAside 之上 plan §4.3）。
-         AI 改动经 api（usePageEditorApi）落地，自动入撤销栈，可 Ctrl+Z 撤销。 -->
-    <AiAssistantPanel
-      v-if="featureAiAssistant"
-      v-model="aiPanelOpen"
-      :site-id="siteId"
-      :page-id="pageId"
-      :schema="schema"
-      :api="api"
-      :selected-id="selectedId"
-    />
+      <!-- AI 助手抽屉(M6) -->
+      <AiAssistantPanel v-model="aiPanelOpen" :ai="aiChat" />
+    </div>
   </div>
 </template>
 
@@ -650,303 +885,207 @@ watch(siteId, loadDatasources)
 .page-editor {
   display: flex;
   flex-direction: column;
+  height: 100vh;
+  background: #f0f2f5;
+  overflow: hidden;
+}
+
+.page-editor__error-banner {
+  padding: 24px;
+  color: #f56c6c;
+  text-align: center;
+
+  .hint {
+    color: #909399;
+    font-size: 12px;
+    margin-top: 8px;
+  }
+}
+
+.page-editor__ide {
+  display: flex;
+  flex-direction: column;
   height: 100%;
+  flex: 1;
   min-height: 0;
+}
 
-  &__meta {
-    margin-bottom: 12px;
-    flex-shrink: 0;
+// ===== 顶栏 =====
+.page-editor__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  padding: 0 16px;
+  background: #fff;
+  border-bottom: 1px solid #e4e7ed;
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.page-editor__meta-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .meta-input {
+    width: 180px;
   }
 
-  &__error-card {
-    margin-bottom: 12px;
-    flex-shrink: 0;
+  .meta-path {
+    width: 140px;
   }
+}
 
-  &__workspace {
-    flex: 1;
-    min-height: 0;
-    border: 1px solid #ebeef5;
-    border-radius: 4px;
-    background: #fff;
+.page-editor__toolbar {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  justify-content: center;
+}
+
+.page-editor__meta-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// 状态标签与草稿预览按钮（T8）
+.meta-status-tag {
+  font-weight: 500;
+}
+
+.meta-preview-btn {
+  color: #606266;
+}
+
+// ===== 主体三栏 =====
+.page-editor__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+// 左栏
+.page-editor__left {
+  position: relative;
+  width: 260px;
+  background: #fff;
+  border-right: 1px solid #e4e7ed;
+  flex-shrink: 0;
+  transition: width 0.2s ease;
+  overflow: hidden;
+
+  &--collapsed {
+    width: 32px;
   }
+}
 
-  &__aside {
-    background: #fafafa;
-    overflow: auto;
-    box-sizing: border-box;
+.page-editor__component-panel {
+  width: 260px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+// 中间画布
+.page-editor__canvas-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 24px;
+  overflow: auto;
+  background: #f0f2f5;
+}
+
+.page-editor__canvas-wrapper {
+  width: 100%;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 8%);
+  min-height: 600px;
+  margin: 0 auto;
+  transition: max-width 0.3s ease;
+}
+
+// 右栏
+.page-editor__right {
+  position: relative;
+  width: 320px;
+  background: #fff;
+  border-left: 1px solid #e4e7ed;
+  flex-shrink: 0;
+  transition: width 0.2s ease;
+  overflow: hidden;
+
+  &--collapsed {
+    width: 32px;
   }
+}
 
-  &__palette {
-    border-right: 1px solid #ebeef5;
-    display: flex;
-    flex-direction: column;
-  }
+.page-editor__right-content {
+  width: 320px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
 
-  &__right {
-    border-left: 1px solid #ebeef5;
-    display: flex;
-    flex-direction: column;
-  }
+.page-editor__property-panel {
+  flex: 1;
+  overflow-y: auto;
+  border-bottom: 1px solid #e4e7ed;
+  min-height: 200px;
+}
 
-  &__right-divider {
-    height: 1px;
-    background: #ebeef5;
-    flex-shrink: 0;
-  }
+.page-editor__outline-tree {
+  height: 280px;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
 
-  &__main {
-    background: #fff;
-    padding: 12px;
-    overflow: auto;
-  }
+.page-editor__panel-title {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  background: #f5f7fa;
+  border-bottom: 1px solid #e4e7ed;
+}
 
-  &__canvas-wrap {
-    margin: 0 auto;
-    transition: max-width 0.2s ease;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-  }
+// 折叠按钮
+.page-editor__collapse-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  width: 20px;
+  height: 40px;
+  border: 1px solid #e4e7ed;
+  background: #fff;
+  cursor: pointer;
+  font-size: 10px;
+  color: #909399;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 
-  &__breakpoints {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  &__multiselect-bar {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 8px;
-    background: #ecf5ff;
-    border-radius: 4px;
-  }
-
-  &__panel-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: #303133;
-    padding: 10px 12px;
-    border-bottom: 1px solid #ebeef5;
-    flex-shrink: 0;
-  }
-
-  &__palette-search {
-    padding: 8px 10px;
-    flex-shrink: 0;
-    border-bottom: 1px solid #ebeef5;
-  }
-
-  &__palette-search-input {
-    width: 100%;
-    padding: 5px 8px;
-    border: 1px solid #dcdfe6;
-    border-radius: 4px;
-    font-size: 12px;
-    color: #303133;
-    background: #fff;
-    outline: none;
-    box-sizing: border-box;
-
-    &::placeholder {
-      color: #c0c4cc;
-    }
-
-    &:focus {
-      border-color: #409eff;
-    }
-  }
-
-  &__palette-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 4px 0;
-  }
-
-  &__palette-group {
-    // group wrapper, no extra padding
-  }
-
-  &__palette-cat {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    width: 100%;
-    padding: 6px 12px;
-    border: none;
-    background: none;
-    font-size: 11.5px;
-    font-weight: 600;
-    color: #909399;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    cursor: pointer;
-    text-align: left;
-
-    &:hover {
-      color: #606266;
-      background: #f5f7fa;
-    }
-  }
-
-  &__palette-cat-arrow {
-    flex-shrink: 0;
-    color: #c0c4cc;
-    transition: transform 0.15s ease;
-  }
-
-  &__palette-cat-arrow--open {
-    transform: rotate(90deg);
-    color: #909399;
-  }
-
-  &__palette-cat-count {
-    margin-left: auto;
-    font-size: 10px;
-    color: #c0c4cc;
-    font-weight: 400;
-  }
-
-  &__palette-items {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 4px;
-    padding: 2px 10px 8px;
-  }
-
-  &__palette-item {
-    user-select: none;
-    cursor: grab;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 8px;
-    background: #fff;
-    border: 1px solid #ebeef5;
-    border-radius: 6px;
-    font-size: 12px;
-    color: #606266;
-    transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
-
-    &:hover {
-      border-color: #409eff;
-      color: #409eff;
-      background: #ecf5ff;
-      box-shadow: 0 1px 3px rgba(64, 158, 255, 0.12);
-    }
-
-    &:active {
-      cursor: grabbing;
-      transform: scale(0.97);
-    }
-  }
-
-  &__palette-item-icon {
-    flex-shrink: 0;
-    color: #909399;
-    transition: color 0.15s;
-  }
-
-  &__palette-item:hover &__palette-item-icon {
+  &:hover {
+    background: #f5f7fa;
     color: #409eff;
   }
+}
 
-  &__palette-item-icon-text {
-    flex-shrink: 0;
-    width: 20px;
-    height: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    font-weight: 700;
-    color: #fff;
-    background: #909399;
-    border-radius: 4px;
-    transition: background 0.15s;
-  }
+// 左栏的折叠按钮在右边
+.page-editor__left .page-editor__collapse-btn {
+  right: 0;
+  border-radius: 4px 0 0 4px;
+}
 
-  &__palette-item:hover &__palette-item-icon-text {
-    background: #409eff;
-  }
-
-  &__palette-item-label {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  &__palette-empty {
-    padding: 24px 12px;
-    text-align: center;
-    color: #c0c4cc;
-    font-size: 12px;
-  }
-
-  &__error {
-    color: #f56c6c;
-    margin: 0 0 8px;
-  }
-
-  // === 全屏设计器模式 ===
-  &--designer {
-    height: 100vh;
-    overflow: hidden;
-
-    .page-editor__workspace {
-      border: none;
-      border-radius: 0;
-      height: calc(100vh - 48px);
-    }
-
-    .page-editor__aside {
-      border-right: 1px solid #ebeef5;
-    }
-  }
-
-  &__designer-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 48px;
-    padding: 0 16px;
-    background: #fff;
-    border-bottom: 1px solid #ebeef5;
-    flex-shrink: 0;
-  }
-
-  &__designer-bar-left {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 200px;
-  }
-
-  &__designer-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: #303133;
-  }
-
-  &__designer-bar-center {
-    flex: 1;
-    text-align: center;
-  }
-
-  &__designer-path {
-    font-size: 12px;
-    color: #909399;
-    font-family: monospace;
-  }
-
-  &__designer-bar-right {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 200px;
-    justify-content: flex-end;
-  }
+// 右栏的折叠按钮在左边
+.page-editor__right .page-editor__collapse-btn {
+  left: 0;
+  border-radius: 0 4px 4px 0;
 }
 </style>

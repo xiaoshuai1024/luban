@@ -1,29 +1,29 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElForm, ElFormItem, ElInput, ElButton, ElMessage } from 'element-plus'
-import { useUserStore } from '@/stores'
-import { login } from '@/api/auth'
-import { setToken } from '@/api/request'
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { ElForm, ElFormItem, ElInput, ElButton, ElMessage } from 'element-plus';
+import { useUserStore } from '@/stores';
+import { login } from '@/api/auth';
+import { setToken } from '@/api/request';
 
-const router = useRouter()
-const userStore = useUserStore()
+const router = useRouter();
+const userStore = useUserStore();
 
-const form = ref({ username: '', password: '' })
-const loading = ref(false)
+const form = ref({ username: '', password: '' });
+const loading = ref(false);
 
 async function onSubmit() {
-  loading.value = true
+  loading.value = true;
   try {
-    const { data } = await login(form.value)
-    setToken(data.token)
-    userStore.setAuth(data.token, data.user)
-    ElMessage.success('登录成功')
-    router.push('/dashboard')
+    const { data } = await login(form.value);
+    setToken(data.token);
+    userStore.setAuth(data.token, data.user);
+    ElMessage.success('登录成功');
+    router.push('/dashboard');
   } catch (e) {
-    ElMessage.error((e as Error).message || '登录失败')
+    ElMessage.error((e as Error).message || '登录失败');
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 </script>
@@ -38,10 +38,23 @@ async function onSubmit() {
           <ElInput v-model="form.username" placeholder="请输入账号" size="large" />
         </ElFormItem>
         <ElFormItem label="密码">
-          <ElInput v-model="form.password" type="password" placeholder="请输入密码" size="large" show-password @keyup.enter="onSubmit" />
+          <ElInput
+            v-model="form.password"
+            type="password"
+            placeholder="请输入密码"
+            size="large"
+            show-password
+            @keyup.enter="onSubmit"
+          />
         </ElFormItem>
         <ElFormItem>
-          <ElButton type="primary" size="large" :loading="loading" class="login-page__btn" @click="onSubmit">
+          <ElButton
+            type="primary"
+            size="large"
+            :loading="loading"
+            class="login-page__btn"
+            @click="onSubmit"
+          >
             登录
           </ElButton>
         </ElFormItem>
@@ -65,7 +78,7 @@ async function onSubmit() {
   padding: 40px;
   background: #fff;
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 12%);
 }
 
 .login-page__title {

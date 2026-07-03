@@ -5,9 +5,8 @@
  * ElDialog + 缩略图网格；按 category 分组展示；点击模板卡片 emit('select', template)。
  * 含「空白页」选项（从零开始）。
  *
- * 用法：
- *   <TemplatePicker v-model="visible" @select="onPick" />
- *   onPick(tpl) → 注入 schema 到 PageEditor
+ * 数据源：优先从市场 API（/api/public/templates）拉取 published/featured 模板；
+ * API 不可达时回退到本地 TEMPLATES 种子（离线兜底，template-marketplace plan）。
  *
  * FeatureGate：VITE_FEATURE_TEMPLATES 关闭时 PageList 不触发本弹层。
  */
@@ -15,8 +14,9 @@ import {
   ElDialog,
   ElEmpty,
 } from 'element-plus'
-import { computed } from 'vue'
-import { TEMPLATES, groupTemplatesByCategory, type PageTemplate } from '@/config/templates'
+import { computed, ref, watch } from 'vue'
+import { TEMPLATES, type PageTemplate } from '@/config/templates'
+import { getPublicTemplates, getPublicTemplateSchema } from '@/api/template'
 
 const props = defineProps<{
   modelValue: boolean
@@ -32,9 +32,70 @@ const visible = computed({
   set: (v: boolean) => emit('update:modelValue', v),
 })
 
-const grouped = computed(() => groupTemplatesByCategory())
+/** 市场模板（API 拉取，弹层打开时加载一次）。 */
+const marketplaceTemplates = ref<PageTemplate[]>([])
+const loading = ref(false)
+/** 是否使用市场数据（true=API 成功，false=回退本地 TEMPLATES）。 */
+const useMarketplace = ref(false)
 
-function pick(tpl: PageTemplate): void {
+/** 当前展示的模板源（市场优先，本地兜底）。 */
+const source = computed<PageTemplate[]>(() =>
+  useMarketplace.value ? marketplaceTemplates.value : TEMPLATES,
+)
+
+/** 按 category 分组（基于当前 source）。 */
+const grouped = computed(() => {
+  const groups: Record<string, PageTemplate[]> = {}
+  for (const tpl of source.value) {
+    const cat = tpl.category || 'other'
+    if (!groups[cat]) groups[cat] = []
+    groups[cat].push(tpl)
+  }
+  return Object.entries(groups).map(([category, templates]) => ({ category, templates }))
+})
+
+/** 弹层打开时从市场加载（失败静默回退本地）。 */
+async function loadMarketplace() {
+  if (useMarketplace.value || loading.value) return
+  loading.value = true
+  try {
+    const metas = await getPublicTemplates()
+    if (metas && metas.length > 0) {
+      // 转 PageTemplate（schema 延迟加载，选中时才取）
+      marketplaceTemplates.value = metas.map((m) => ({
+        id: m.id,
+        name: m.name,
+        category: m.category,
+        description: m.description ?? '',
+        thumbnail: m.thumbnail ?? '📄',
+        // schema 占位，选中时按需拉取（见 pick）
+        schema: { root: { id: 'root', type: 'LubanContainer', props: {}, children: [] } },
+      }))
+      useMarketplace.value = true
+    }
+  } catch {
+    // API 不可达，静默回退本地 TEMPLATES（离线兜底）
+    useMarketplace.value = false
+  } finally {
+    loading.value = false
+  }
+}
+
+watch(visible, (open) => {
+  if (open) loadMarketplace()
+})
+
+async function pick(tpl: PageTemplate): Promise<void> {
+  // 市场模板：选中时按需拉取真实 schema（避免列表加载全部 schema 体积）
+  if (useMarketplace.value) {
+    const schema = await getPublicTemplateSchema(tpl.id)
+    if (schema) {
+      emit('select', { ...tpl, schema })
+      emit('update:modelValue', false)
+      return
+    }
+    // schema 拉取失败，仍用占位（让 PageEditor 自行处理空 schema）
+  }
   emit('select', tpl)
   emit('update:modelValue', false)
 }
@@ -53,7 +114,10 @@ function close(): void {
     @close="close"
   >
     <div class="template-picker">
-      <p class="template-picker__hint">选择一个模板快速开始，或从空白页自由搭建。共 {{ TEMPLATES.length }} 个模板。</p>
+      <p class="template-picker__hint">
+        选择一个模板快速开始，或从空白页自由搭建。
+        共 {{ source.length }} 个模板{{ useMarketplace ? '（市场）' : '（本地）' }}
+      </p>
       <div v-for="group in grouped" :key="group.category" class="template-picker__group">
         <div class="template-picker__group-title">{{ group.category }}</div>
         <div class="template-picker__grid">
@@ -69,7 +133,7 @@ function close(): void {
           </button>
         </div>
       </div>
-      <ElEmpty v-if="TEMPLATES.length === 0" description="暂无模板" />
+      <ElEmpty v-if="source.length === 0 && !loading" description="暂无模板" />
     </div>
   </ElDialog>
 </template>

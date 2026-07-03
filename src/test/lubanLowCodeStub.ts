@@ -125,6 +125,113 @@ export function isContainerType(type: string): boolean {
 // 兼容 PageEditor 未直接使用但可能被间接引用的导出（占位）
 export const canAcceptChild = (type: string): boolean => isContainerType(type)
 
+/** 节点 id 生成（PageEditor.onAddNode 调用）。stub 返回固定格式 id。 */
+export function genNodeId(prefix = 'n'): string {
+  return `${prefix}-stub-${Math.random().toString(36).slice(2, 10)}`
+}
+
+// === PageEditor 调用的 schema 树操作（与 schemaTree.ts 逻辑一致的最小实现）===
+type SchemaNode = { id: string; type: string; props?: Record<string, unknown>; children?: SchemaNode[]; events?: Record<string, unknown> }
+
+export function findNode(root: SchemaNode, id: string): SchemaNode | null {
+  if (root.id === id) return root
+  if (root.children) {
+    for (const c of root.children) {
+      const found = findNode(c, id)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+export function insertNode(root: SchemaNode, node: SchemaNode, parentId?: string): boolean {
+  if (!parentId || root.id === parentId) {
+    if (!root.children) root.children = []
+    root.children.push(node)
+    return true
+  }
+  if (root.children) {
+    for (const c of root.children) {
+      if (insertNode(c, node, parentId)) return true
+    }
+  }
+  return false
+}
+
+export function removeNode(root: SchemaNode, id: string): boolean {
+  if (root.children) {
+    const idx = root.children.findIndex((c) => c.id === id)
+    if (idx >= 0) { root.children.splice(idx, 1); return true }
+    for (const c of root.children) { if (removeNode(c, id)) return true }
+  }
+  return false
+}
+
+export function moveNode(root: SchemaNode, nodeId: string, toParentId: string | null, toIdx: number): boolean {
+  let moved: SchemaNode | null = null
+  function extract(n: SchemaNode): boolean {
+    if (n.children) {
+      const idx = n.children.findIndex((c) => c.id === nodeId)
+      if (idx >= 0) { moved = n.children.splice(idx, 1)[0]; return true }
+      for (const c of n.children) { if (extract(c)) return true }
+    }
+    return false
+  }
+  if (!extract(root) || !moved) return false
+  const host = toParentId ? findNode(root, toParentId) : root
+  if (!host) return false
+  if (!host.children) host.children = []
+  host.children.splice(Math.min(toIdx, host.children.length), 0, moved)
+  return true
+}
+
+export function duplicateNode(root: SchemaNode, nodeId: string): string | null {
+  const node = findNode(root, nodeId)
+  if (!node) return null
+  function findParent(n: SchemaNode): SchemaNode | null {
+    if (n.children) {
+      if (n.children.some((c) => c.id === nodeId)) return n
+      for (const c of n.children) { const p = findParent(c); if (p) return p }
+    }
+    return null
+  }
+  const parent = findParent(root)
+  if (!parent || !parent.children) return null
+  const clone = JSON.parse(JSON.stringify(node)) as SchemaNode
+  clone.id = genNodeId(node.type)
+  const idx = parent.children.findIndex((c) => c.id === nodeId)
+  parent.children.splice(idx + 1, 0, clone)
+  return clone.id
+}
+
+export function updateNodeProps(root: SchemaNode, nodeId: string, props: Record<string, unknown>): boolean {
+  const node = findNode(root, nodeId)
+  if (!node) return false
+  node.props = { ...(node.props ?? {}), ...props }
+  return true
+}
+
+/** 层级操作（z-index 语义在 schema 里靠 children 顺序，stub 做端点移动）*/
+export function bringToFront(root: SchemaNode, nodeId: string): void {
+  const idx = root.children?.findIndex((c) => c.id === nodeId) ?? -1
+  if (idx >= 0 && root.children) {
+    const [m] = root.children.splice(idx, 1)
+    root.children.push(m)
+  }
+}
+
+export function sendToBack(root: SchemaNode, nodeId: string): void {
+  const idx = root.children?.findIndex((c) => c.id === nodeId) ?? -1
+  if (idx >= 0 && root.children) {
+    const [m] = root.children.splice(idx, 1)
+    root.children.unshift(m)
+  }
+}
+
+export function getSnippetById(_id: string): SchemaNode | null {
+  return null
+}
+
 // === V2-T4 响应式纯逻辑（与 luban-low-code 真实实现一致的最小子集）===
 export const BREAKPOINTS = { tablet: 1024, mobile: 768 } as const
 
@@ -258,4 +365,21 @@ export function collectInViewNodes(root: { id?: string; animation?: { trigger?: 
 
 export function useAnimationObserver(): { observe: () => void; disconnect: () => void } {
   return { observe: () => {}, disconnect: () => {} }
+}
+
+// === useHistory stub（PageEditor 动态加载后调用，测试需可 swallow）===
+// 接口与 engine 自己的 useHistory.ts 对齐：push(current)/undo()/redo()/canUndo/canRedo/current
+export function useHistory<T>(initial: T) {
+  const past: T[] = []
+  const future: T[] = []
+  const current = { value: initial }
+  return {
+    current,
+    canUndo: { get value() { return past.length > 0 } },
+    canRedo: { get value() { return future.length > 0 } },
+    push: (val: T) => { past.push(JSON.parse(JSON.stringify(current.value))); current.value = val; future.length = 0 },
+    undo: () => { if (past.length) { future.push(JSON.parse(JSON.stringify(current.value))); current.value = past.pop()!; return true } return false },
+    redo: () => { if (future.length) { past.push(JSON.parse(JSON.stringify(current.value))); current.value = future.pop()!; return true } return false },
+    reset: () => { past.length = 0; future.length = 0 },
+  }
 }

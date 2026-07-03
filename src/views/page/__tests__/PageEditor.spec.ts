@@ -31,9 +31,10 @@ const routeState = {
   meta: {},
 }
 const routerPush = vi.fn()
+const routerResolve = vi.fn(() => ({ href: '/' }))
 vi.mock('vue-router', () => ({
   useRoute: () => routeState,
-  useRouter: () => ({ push: routerPush, replace: routerPush }),
+  useRouter: () => ({ push: routerPush, replace: routerPush, resolve: routerResolve }),
 }))
 
 // === stubs for @/api/page ===

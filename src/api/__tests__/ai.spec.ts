@@ -63,41 +63,46 @@ describe('ai client', () => {
     expect(call[1].headers.Authorization).toBeUndefined()
   })
 
-  it('streamAi 解析 SSE confirm 事件', async () => {
-    const sseBody = 'event: progress\ndata: {"type":"progress","message":"生成中"}\n\n' +
+  it('streamAi 解析 SSE confirm 事件（async generator）', async () => {
+    const sseBody = 'event: progress\ndata: {"type":"progress","ts":1,"message":"生成中"}\n\n' +
       'event: confirm\ndata: {"type":"confirm","session_id":"s1","schema":{"root":{"id":"r","type":"LubanPage","props":{},"children":[]}}}\n\n'
     ;(globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       mockFetchResponse(sseBody)
     )
-    const events: unknown[] = []
-    await new Promise<void>((resolve) => {
-      streamAi('/ai/chat', { message: 'x' }, {
-        onProgress: (e) => events.push({ progress: e }),
-        onConfirm: (e) => { events.push({ confirm: e }); resolve() },
-      })
-    })
-    expect(events.some((e) => (e as { confirm?: unknown }).confirm)).toBe(true)
+    const events: { type: string; [k: string]: unknown }[] = []
+    for await (const ev of streamAi('/ai/chat', { message: 'x' })) {
+      events.push(ev as { type: string; [k: string]: unknown })
+    }
+    expect(events.some((e) => e.type === 'progress')).toBe(true)
+    const confirm = events.find((e) => e.type === 'confirm')
+    expect(confirm).toBeTruthy()
+    expect((confirm as { schema?: unknown }).schema).toBeTruthy()
   })
 
-  it('streamAi error 事件触发 onError', async () => {
+  it('streamAi error 事件（async generator）', async () => {
     const sseBody = 'event: error\ndata: {"type":"error","message":"生成失败"}\n\n'
     ;(globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       mockFetchResponse(sseBody)
     )
-    const err = await new Promise<string>((resolve) => {
-      streamAi('/ai/chat', { message: 'x' }, {
-        onError: (e) => resolve(e.message),
-      })
-    })
-    expect(err).toBe('生成失败')
+    const errors: string[] = []
+    for await (const ev of streamAi('/ai/chat', { message: 'x' })) {
+      if ((ev as { type: string }).type === 'error') {
+        errors.push((ev as { message: string }).message)
+      }
+    }
+    expect(errors).toContain('生成失败')
   })
 
-  it('streamAi 返回 AbortController', () => {
+  it('streamAi 支持 AbortSignal 透传', async () => {
     ;(globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       mockFetchResponse('')
     )
-    const ctrl = streamAi('/ai/chat', { message: 'x' }, {})
-    expect(ctrl).toBeInstanceOf(AbortController)
-    ctrl.abort()
+    const ctrl = new AbortController()
+    // 消费 generator（空 body 会正常 done）
+    const gen = streamAi('/ai/chat', { message: 'x' }, ctrl.signal)
+    await gen.next()
+    // 验证 signal 被透传到 fetch
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(call[1].signal).toBe(ctrl.signal)
   })
 })

@@ -872,8 +872,8 @@ watch([siteId, pageId], loadPage);
         @close="contextMenuVisible = false"
       />
 
-      <!-- 数据源管理弹窗 -->
-      <DatasourceManageDialog v-model="dsManageVisible" :site-id="siteId" @change="loadPage" />
+      <!-- 数据源管理弹窗（CRUD 后刷新数据源下拉） -->
+      <DatasourceManageDialog v-model="dsManageVisible" :site-id="siteId" @refresh="loadPage" />
 
       <!-- AI 助手抽屉(M6) -->
       <AiAssistantPanel v-model="aiPanelOpen" :ai="aiChat" />

@@ -1,168 +1,338 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { useRoute } from 'vue-router';
+import { ref, onMounted, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import {
+  ElButton,
   ElTable,
   ElTableColumn,
   ElTag,
-  ElInput,
-  ElButton,
   ElPagination,
-  ElEmpty,
+  ElInput,
+  ElSelect,
+  ElOption,
   ElMessage,
-} from 'element-plus';
-import { getLeads, LEAD_STATUS_MAP, type Lead } from '@/api/lead';
-import LeadDetail from './LeadDetail.vue';
+  ElMessageBox,
+} from 'element-plus'
+import {
+  getLeads,
+  exportLeadsCsv,
+  updateLeadStatus,
+  LEAD_STATUS_LABELS,
+  LEAD_STATUS_COLORS,
+  LEAD_STATUS_TRANSITIONS,
+  type LeadResponse,
+} from '@/api/lead'
+import { getForms, type FormResponse } from '@/api/form'
+import { formatDateTime } from '@/utils/datetime'
+import { useUserStore } from '@/stores'
+import { AxiosError } from 'axios'
 
-/**
- * 线索中心（lead-capture-mvp T-eng 缺口补全）。
- * 展示当前站点的留资线索列表（脱敏），点击「详情」查看完整字段。
- */
-const route = useRoute();
-const siteId = route.params.siteId as string;
-/** 支持 FormList「查看线索」跳转带的 formId 过滤 */
-const formIdFilter = (route.query.formId as string) || '';
+const router = useRouter()
+const route = useRoute()
+const userStore = useUserStore()
 
-const list = ref<Lead[]>([]);
-const total = ref(0);
-const page = ref(1);
-const size = ref(10);
-const loading = ref(false);
-const keyword = ref('');
+const list = ref<LeadResponse[]>([])
+const total = ref(0)
+const loading = ref(false)
+const page = ref(1)
+const pageSize = ref(20)
+const filterStatus = ref('')
+const filterFormId = ref('')
+const keyword = ref('')
 
-// 详情抽屉
-const detailVisible = ref(false);
-const detailLeadId = ref<string | null>(null);
+const forms = ref<FormResponse[]>([])
+const siteId = ref('')
 
-async function fetchList() {
-  loading.value = true;
+const noPermission = ref(false)
+
+const hasTransitionTargets = computed(() => (status: string) =>
+  (LEAD_STATUS_TRANSITIONS[status] ?? []).length > 0
+)
+
+async function fetchForms() {
+  if (!siteId.value) return
   try {
-    const { data } = await getLeads(siteId, {
-      page: page.value,
-      size: size.value,
-      keyword: keyword.value,
-      formId: formIdFilter || undefined,
-    });
-    list.value = data.list ?? [];
-    total.value = data.total ?? 0;
-  } catch (e) {
-    list.value = [];
-    total.value = 0;
-    ElMessage.error((e as Error).message || '加载线索失败');
-  } finally {
-    loading.value = false;
+    const { data } = await getForms(siteId.value)
+    forms.value = data ?? []
+  } catch {
+    // forms fetch is non-critical
   }
 }
 
-function openDetail(row: Lead) {
-  detailLeadId.value = row.id;
-  detailVisible.value = true;
+async function fetchList() {
+  if (!siteId.value) {
+    ElMessage.warning('请先选择一个站点')
+    return
+  }
+  loading.value = true
+  try {
+    const params: Record<string, unknown> = {
+      siteId: siteId.value,
+      page: page.value,
+      size: pageSize.value,
+    }
+    if (filterStatus.value) params.status = filterStatus.value
+    if (filterFormId.value) params.formId = filterFormId.value
+    if (keyword.value) params.keyword = keyword.value
+    const { data } = await getLeads(params as any)
+    list.value = data?.list ?? []
+    total.value = data?.total ?? 0
+    noPermission.value = false
+  } catch (e) {
+    const status = (e as AxiosError).response?.status
+    if (status === 403) {
+      noPermission.value = true
+      ElMessage.error('当前账号没有线索管理权限')
+    }
+    list.value = []
+    total.value = 0
+  } finally {
+    loading.value = false
+  }
 }
 
-function statusTagType(status: string): string {
-  return LEAD_STATUS_MAP[status]?.type ?? 'info';
-}
-function statusLabel(status: string): string {
-  return LEAD_STATUS_MAP[status]?.label ?? status;
+async function handleExport() {
+  try {
+    const res = await exportLeadsCsv(siteId.value)
+    const blob = new Blob([res.data as BlobPart], { type: 'text/csv;charset=UTF-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `leads-${siteId.value}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+  } catch {
+    ElMessage.error('导出失败')
+  }
 }
 
-/** 联系人姓名（contactMasked.name 或 fallback） */
-function contactName(row: Lead): string {
-  return row.contactMasked?.name || row.contactMasked?.Name || '—';
-}
-/** 脱敏手机号 */
-function contactPhone(row: Lead): string {
-  return row.contactMasked?.phone || row.contactMasked?.Phone || '—';
+async function handleTransitStatus(row: LeadResponse, targetStatus: string) {
+  const label = LEAD_STATUS_LABELS[targetStatus] ?? targetStatus
+  try {
+    await ElMessageBox.confirm(
+      `确定将线索从「${LEAD_STATUS_LABELS[row.status] ?? row.status}」变更为「${label}」？`,
+      '状态变更',
+      { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' }
+    )
+  } catch {
+    return // user cancelled
+  }
+
+  try {
+    const actorId = userStore.token ?? undefined
+    await updateLeadStatus(siteId.value, row.id, {
+      status: targetStatus,
+      assigneeId: actorId,
+    })
+    ElMessage.success(`状态已变更为「${label}」`)
+    fetchList()
+  } catch (e) {
+    ElMessage.error((e as Error).message || '状态变更失败')
+  }
 }
 
-onMounted(fetchList);
+function goDetail(row: LeadResponse) {
+  router.push({
+    name: 'LeadDetail',
+    params: { siteId: siteId.value, id: row.id },
+  })
+}
+
+function onPageChange(p: number) {
+  page.value = p
+  fetchList()
+}
+
+function onSizeChange(s: number) {
+  pageSize.value = s
+  page.value = 1
+  fetchList()
+}
+
+function initSiteId() {
+  // Try to get siteId from route params first, then localStorage
+  const routeSiteId = route.params.siteId as string
+  if (routeSiteId) {
+    siteId.value = routeSiteId
+    localStorage.setItem('luban_current_site_id', routeSiteId)
+    return
+  }
+  const stored = localStorage.getItem('luban_current_site_id')
+  if (stored) {
+    siteId.value = stored
+  }
+}
+
+onMounted(() => {
+  initSiteId()
+  if (siteId.value) {
+    fetchForms()
+    fetchList()
+  }
+})
 </script>
 
 <template>
   <div class="lead-list">
-    <h1 class="lead-list__title">线索中心</h1>
-
-    <div class="lead-list__toolbar">
-      <ElInput
-        v-model="keyword"
-        placeholder="搜索姓名/手机号"
-        clearable
-        style="width: 240px"
-        @keyup.enter="fetchList"
-        @clear="fetchList"
-      />
-      <ElButton type="primary" @click="fetchList">搜索</ElButton>
+    <div class="lead-list__header">
+      <h2 class="lead-list__title">线索中心</h2>
     </div>
 
-    <ElTable v-loading="loading" :data="list" border style="width: 100%">
-      <ElTableColumn label="姓名" min-width="100">
-        <template #default="{ row }">{{ contactName(row) }}</template>
-      </ElTableColumn>
-      <ElTableColumn label="手机号" min-width="140">
-        <template #default="{ row }">{{ contactPhone(row) }}</template>
-      </ElTableColumn>
-      <ElTableColumn label="来源表单" prop="formName" min-width="120">
-        <template #default="{ row }">{{ row.formName || row.formId }}</template>
-      </ElTableColumn>
-      <ElTableColumn label="状态" width="100">
-        <template #default="{ row }">
-          <ElTag :type="statusTagType(row.status)" size="small">{{
-            statusLabel(row.status)
-          }}</ElTag>
-        </template>
-      </ElTableColumn>
-      <ElTableColumn label="提交时间" prop="createdAt" min-width="170">
-        <template #default="{ row }">{{ row.createdAt }}</template>
-      </ElTableColumn>
-      <ElTableColumn label="操作" width="100" fixed="right">
-        <template #default="{ row }">
-          <ElButton type="primary" link @click="openDetail(row)">详情</ElButton>
-        </template>
-      </ElTableColumn>
-      <template #empty>
-        <ElEmpty description="暂无线索" />
-      </template>
-    </ElTable>
+    <!-- Filter toolbar -->
+    <div class="lead-list__toolbar">
+      <ElSelect
+        v-model="filterStatus"
+        placeholder="线索状态"
+        clearable
+        style="width: 140px"
+        @change="fetchList"
+      >
+        <ElOption
+          v-for="(label, key) in LEAD_STATUS_LABELS"
+          :key="key"
+          :label="label"
+          :value="key"
+        />
+      </ElSelect>
+      <ElSelect
+        v-model="filterFormId"
+        placeholder="来源表单"
+        clearable
+        style="width: 180px"
+        @change="fetchList"
+      >
+        <ElOption
+          v-for="f in forms"
+          :key="f.id"
+          :label="f.name"
+          :value="f.id"
+        />
+      </ElSelect>
+      <ElInput
+        v-model="keyword"
+        placeholder="搜索联系人"
+        clearable
+        style="width: 200px"
+        @keyup.enter="fetchList"
+      />
+      <ElButton type="primary" @click="fetchList">查询</ElButton>
+      <ElButton @click="handleExport">导出 CSV</ElButton>
+    </div>
 
-    <ElPagination
-      v-if="total > 0"
-      v-model:current-page="page"
-      class="lead-list__pager"
-      :page-size="size"
-      :total="total"
-      layout="total, prev, pager, next"
-      @current-change="fetchList"
+    <!-- No site selected hint -->
+    <ElAlert
+      v-if="!siteId"
+      title="请先选择站点"
+      type="warning"
+      show-icon
+      :closable="false"
+      style="margin-bottom: 16px"
     />
 
-    <!-- 详情抽屉 -->
-    <LeadDetail
-      v-if="detailVisible && detailLeadId"
-      :site-id="siteId"
-      :lead-id="detailLeadId"
-      @close="detailVisible = false"
+    <!-- No permission hint -->
+    <ElAlert
+      v-if="noPermission"
+      title="权限不足"
+      description="当前账号没有线索管理权限，请使用管理员账号登录"
+      type="error"
+      show-icon
+      :closable="false"
+      style="margin-bottom: 16px"
+    />
+
+    <!-- Data table -->
+    <ElTable :data="list" v-loading="loading" stripe @row-dblclick="goDetail">
+      <ElTableColumn label="联系人" min-width="180">
+        <template #default="{ row }">
+          <div class="lead-list__contact">
+            <span v-for="(val, key) in row.contactMasked" :key="key" class="lead-list__contact-item">
+              {{ key }}: {{ val }}
+            </span>
+          </div>
+        </template>
+      </ElTableColumn>
+      <ElTableColumn prop="formName" label="来源表单" min-width="120" />
+      <ElTableColumn label="状态" width="100">
+        <template #default="{ row }">
+          <ElTag :type="(LEAD_STATUS_COLORS[row.status] as any) || 'info'" size="small">
+            {{ LEAD_STATUS_LABELS[row.status] ?? row.status }}
+          </ElTag>
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="渠道" width="100">
+        <template #default="{ row }">
+          {{ row.utm?.source || '-' }}
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="创建时间" width="180">
+        <template #default="{ row }">
+          {{ formatDateTime(row.createdAt) }}
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="操作" width="240" fixed="right">
+        <template #default="{ row }">
+          <ElButton link type="primary" @click="goDetail(row)">详情</ElButton>
+          <template v-if="hasTransitionTargets(row.status)">
+            <ElButton
+              v-for="target in (LEAD_STATUS_TRANSITIONS[row.status] ?? [])"
+              :key="target"
+              link
+              :type="target === 'converted' ? 'success' : 'primary'"
+              @click="handleTransitStatus(row, target)"
+            >
+              {{ LEAD_STATUS_LABELS[target] }}
+            </ElButton>
+          </template>
+        </template>
+      </ElTableColumn>
+    </ElTable>
+
+    <!-- Pagination -->
+    <ElPagination
+      v-model:current-page="page"
+      v-model:page-size="pageSize"
+      :total="total"
+      :page-sizes="[10, 20, 50]"
+      layout="total, sizes, prev, pager, next"
+      class="lead-list__pagination"
+      @current-change="onPageChange"
+      @size-change="onSizeChange"
     />
   </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .lead-list {
-  padding: 16px;
-}
-
-.lead-list__title {
-  font-size: 20px;
-  font-weight: 600;
-  margin: 0 0 16px;
-}
-
-.lead-list__toolbar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.lead-list__pager {
-  margin-top: 16px;
-  justify-content: flex-end;
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  &__title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+  }
+  &__toolbar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  &__contact {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  &__contact-item {
+    font-size: 13px;
+    color: #303133;
+  }
+  &__pagination {
+    margin-top: 16px;
+    justify-content: flex-end;
+  }
 }
 </style>

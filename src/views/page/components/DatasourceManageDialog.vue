@@ -1,284 +1,317 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+/**
+ * DatasourceManageDialog — 数据源管理弹窗（D15-B1，R2）。
+ *
+ * 列表展示当前 site 的数据源，支持新建/编辑/删除（调 datasource.ts CRUD），
+ * 配「测试连通」按钮（调 testDatasource 显示 ok/message/latencyMs）。
+ * CRUD 完成后 emit('refresh') 通知 PageEditor 重新 loadDatasources 刷新下拉。
+ *
+ * 依赖 Element Plus（ElDialog/ElTable/ElButton/ElForm/ElInput/ElSelect/ElMessage）。
+ */
+import { ref, watch } from 'vue'
 import {
   ElDialog,
   ElTable,
   ElTableColumn,
-  ElTag,
   ElButton,
   ElForm,
   ElFormItem,
   ElInput,
   ElSelect,
   ElOption,
-  ElEmpty,
   ElMessage,
   ElMessageBox,
-} from 'element-plus';
-import type { AxiosError } from 'axios';
+  ElTag,
+} from 'element-plus'
 import {
   getDatasources,
   createDatasource,
   updateDatasource,
   deleteDatasource,
   testDatasource,
-  type Datasource,
-  type DatasourceTestResult,
-  type DatasourceConfig,
-} from '@/api/datasource';
-import { formatDateTime } from '@/utils/datetime';
+} from '@/api/datasource'
+import type {
+  DatasourceMeta,
+  SaveDatasourcePayload,
+  DatasourceTestResult,
+} from '@/api/datasource'
+import { isFeatureEnabled } from '@/config/features'
 
-/**
- * 数据源管理弹窗（设计器内，wave15 R2 计划落地）。
- * CRUD + 测试连接 + headers 脱敏提示。仿 UserList.vue 弹窗模式。
- */
-const props = defineProps<{
-  modelValue: boolean;
-  siteId: string;
-}>();
+interface Props {
+  /** v-model:visible */
+  modelValue: boolean
+  siteId: string
+}
+
+const props = defineProps<Props>()
 const emit = defineEmits<{
-  'update:modelValue': [val: boolean];
-  change: [];
-}>();
+  (e: 'update:modelValue', v: boolean): void
+  /** CRUD 完成后通知父组件刷新数据源下拉 */
+  (e: 'refresh'): void
+}>()
 
-const visible = ref(props.modelValue);
+/** 测试连通按钮开关（FeatureGate） */
+const testConnectEnabled = isFeatureEnabled('testConnect')
+
+/** 列表数据 + 加载态 */
+const list = ref<DatasourceMeta[]>([])
+const loading = ref(false)
+const loadError = ref<string | null>(null)
+
+/** 编辑/新建态 */
+const editing = ref(false)
+const editForm = ref<SaveDatasourcePayload & { id?: string }>(emptyForm())
+const saving = ref(false)
+
+/** 测试连通结果（按 id 缓存最近一次结果） */
+const testResults = ref<Record<string, DatasourceTestResult>>({})
+const testingIds = ref<Set<string>>(new Set())
+
+function emptyForm(): SaveDatasourcePayload & { id?: string } {
+  return { id: undefined, siteId: props.siteId, name: '', type: 'static', config: {} }
+}
+
+async function loadList() {
+  if (!props.siteId) return
+  loading.value = true
+  loadError.value = null
+  try {
+    const { data } = await getDatasources(props.siteId)
+    list.value = data ?? []
+  } catch (e) {
+    loadError.value = (e as Error)?.message || '加载数据源失败'
+    list.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+/** 弹窗打开时加载列表 */
 watch(
   () => props.modelValue,
   (v) => {
-    visible.value = v;
-    if (v) fetchList();
-  },
-);
-watch(visible, (v) => emit('update:modelValue', v));
-
-const list = ref<Datasource[]>([]);
-const loading = ref(false);
-const noPermission = ref(false);
-
-// 编辑表单
-const formVisible = ref(false);
-const editingId = ref<string | null>(null);
-const formLoading = ref(false);
-const form = ref<{
-  name: string;
-  type: 'static' | 'api';
-  url: string;
-  method: string;
-}>({ name: '', type: 'api', url: '', method: 'GET' });
-
-// 测试结果（按 id 索引）
-const testingId = ref<string | null>(null);
-const testResults = ref<Record<string, DatasourceTestResult>>({});
-
-async function fetchList() {
-  loading.value = true;
-  noPermission.value = false;
-  try {
-    const { data } = await getDatasources(props.siteId);
-    list.value = data ?? [];
-  } catch (e) {
-    list.value = [];
-    const status = (e as AxiosError).response?.status;
-    if (status === 403) {
-      noPermission.value = true;
-      ElMessage.error('无权限');
-    } else {
-      ElMessage.error((e as Error).message || '加载数据源失败');
-    }
-  } finally {
-    loading.value = false;
+    if (v) loadList()
   }
+)
+
+function handleClose() {
+  emit('update:modelValue', false)
 }
 
-function openCreate() {
-  editingId.value = null;
-  form.value = { name: '', type: 'api', url: '', method: 'GET' };
-  formVisible.value = true;
+function handleCreate() {
+  editForm.value = emptyForm()
+  editing.value = true
 }
 
-function openEdit(row: Datasource) {
-  editingId.value = row.id;
-  form.value = {
+function handleEdit(row: DatasourceMeta) {
+  editForm.value = {
+    id: row.id,
+    siteId: row.siteId,
     name: row.name,
     type: row.type,
-    url: row.config?.url ?? '',
-    method: row.config?.method ?? 'GET',
-  };
-  formVisible.value = true;
+    config: row.config ?? {},
+  }
+  editing.value = true
 }
 
-async function submitForm() {
-  if (!form.value.name.trim()) {
-    ElMessage.warning('请输入数据源名称');
-    return;
+function handleCancelEdit() {
+  editing.value = false
+  editForm.value = emptyForm()
+}
+
+async function handleSave() {
+  if (!editForm.value.name) {
+    ElMessage.warning('请填写数据源名称')
+    return
   }
-  if (form.value.type === 'api' && !form.value.url.trim()) {
-    ElMessage.warning('API 类型数据源须填写 URL');
-    return;
-  }
-  const config: DatasourceConfig =
-    form.value.type === 'api' ? { url: form.value.url, method: form.value.method } : {};
-  formLoading.value = true;
+  saving.value = true
   try {
-    if (editingId.value) {
-      await updateDatasource(editingId.value, {
-        name: form.value.name,
-        type: form.value.type,
-        config,
-      });
-      ElMessage.success('数据源已更新');
-    } else {
-      await createDatasource({
-        siteId: props.siteId,
-        name: form.value.name,
-        type: form.value.type,
-        config,
-      });
-      ElMessage.success('数据源已创建');
+    const payload: SaveDatasourcePayload = {
+      siteId: editForm.value.siteId,
+      name: editForm.value.name,
+      type: editForm.value.type,
+      config: editForm.value.config,
     }
-    formVisible.value = false;
-    fetchList();
-    emit('change');
+    if (editForm.value.id) {
+      await updateDatasource(editForm.value.id, payload)
+      ElMessage.success('更新成功')
+    } else {
+      await createDatasource(payload)
+      ElMessage.success('创建成功')
+    }
+    editing.value = false
+    await loadList()
+    emit('refresh')
   } catch (e) {
-    const status = (e as AxiosError).response?.status;
-    if (status === 403) ElMessage.error('无权限');
-    else if (status === 409) ElMessage.error('数据源名称已存在');
-    else ElMessage.error((e as Error).message || '保存失败');
+    ElMessage.error((e as Error)?.message || '保存失败')
   } finally {
-    formLoading.value = false;
+    saving.value = false
   }
 }
 
-async function handleTest(row: Datasource) {
-  testingId.value = row.id;
+async function handleDelete(row: DatasourceMeta) {
   try {
-    const { data } = await testDatasource(row.id);
-    testResults.value[row.id] = data;
-    if (data.ok) ElMessage.success(`连接成功（${data.latencyMs ?? 0}ms）`);
-    else ElMessage.error(data.message || '连接失败');
-  } catch (e) {
-    testResults.value[row.id] = { ok: false, message: (e as Error).message };
-    ElMessage.error('连接测试失败');
-  } finally {
-    testingId.value = null;
-  }
-}
-
-async function handleDelete(row: Datasource) {
-  try {
-    await ElMessageBox.confirm(`确认删除数据源「${row.name}」？`, '提示', { type: 'warning' });
+    await ElMessageBox.confirm(`确认删除数据源「${row.name}」？`, '删除确认', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
   } catch {
-    return;
+    return // 用户取消
   }
   try {
-    await deleteDatasource(row.id);
-    ElMessage.success('已删除');
-    fetchList();
-    emit('change');
+    await deleteDatasource(row.id)
+    ElMessage.success('删除成功')
+    await loadList()
+    emit('refresh')
   } catch (e) {
-    const status = (e as AxiosError).response?.status;
-    if (status === 403) ElMessage.error('无权限');
-    else ElMessage.error((e as Error).message || '删除失败');
+    ElMessage.error((e as Error)?.message || '删除失败')
   }
 }
 
-type TagType = 'success' | 'info' | 'warning' | 'danger' | 'primary';
-function typeTagType(t: string): TagType {
-  return (t === 'api' ? 'success' : 'info') as TagType;
+async function handleTest(row: DatasourceMeta) {
+  testingIds.value.add(row.id)
+  try {
+    const { data } = await testDatasource(row.id)
+    testResults.value[row.id] = data
+    if (data.ok) {
+      ElMessage.success(`连通成功（${data.latencyMs ?? 0}ms）`)
+    } else {
+      ElMessage.warning(`连通失败：${data.message ?? '未知原因'}`)
+    }
+  } catch (e) {
+    testResults.value[row.id] = { ok: false, message: (e as Error)?.message }
+    ElMessage.error('测试连通失败')
+  } finally {
+    testingIds.value.delete(row.id)
+  }
+}
+
+/** static 类型配置：rows（JSON 文本编辑）；api 类型：url/method/headers */
+function configText(): string {
+  const cfg = editForm.value.config ?? {}
+  try {
+    return JSON.stringify(cfg, null, 2)
+  } catch {
+    return ''
+  }
+}
+
+function handleConfigInput(text: string) {
+  let parsed: unknown = text
+  if (text.trim() !== '') {
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      parsed = text // 保留非法 JSON 文本，保存时由用户修正
+    }
+  }
+  editForm.value.config = parsed as Record<string, unknown>
 }
 </script>
 
 <template>
-  <ElDialog v-model="visible" title="数据源管理" width="720px" append-to-body>
-    <div class="ds-toolbar">
-      <ElButton type="primary" :disabled="noPermission" @click="openCreate">新建数据源</ElButton>
-      <ElButton @click="fetchList">刷新</ElButton>
+  <ElDialog
+    :model-value="modelValue"
+    title="管理数据源"
+    width="680px"
+    @update:model-value="(v: boolean) => emit('update:modelValue', v)"
+  >
+    <!-- 列表态 -->
+    <div v-if="!editing" v-loading="loading">
+      <div v-if="loadError" class="ds-dialog__error">
+        <p>{{ loadError }}</p>
+        <ElButton size="small" @click="loadList">重试</ElButton>
+      </div>
+      <div class="ds-dialog__toolbar">
+        <ElButton type="primary" size="small" @click="handleCreate">+ 新建数据源</ElButton>
+      </div>
+      <ElTable :data="list" size="small" empty-text="暂无数据源">
+        <ElTableColumn prop="name" label="名称" />
+        <ElTableColumn prop="type" label="类型" width="100">
+          <template #default="{ row }">
+            <ElTag size="small" :type="row.type === 'api' ? 'warning' : 'info'">{{ row.type }}</ElTag>
+          </template>
+        </ElTableColumn>
+        <ElTableColumn v-if="testConnectEnabled" label="连通" width="180">
+          <template #default="{ row }">
+            <ElButton
+              link
+              size="small"
+              :loading="testingIds.has(row.id)"
+              @click="handleTest(row)"
+            >
+              测试连通
+            </ElButton>
+            <span
+              v-if="testResults[row.id]"
+              class="ds-dialog__test-result"
+              :class="{ 'is-ok': testResults[row.id].ok, 'is-fail': !testResults[row.id].ok }"
+            >
+              {{ testResults[row.id].ok ? `✓ ${testResults[row.id].latencyMs ?? 0}ms` : '✗ 失败' }}
+            </span>
+          </template>
+        </ElTableColumn>
+        <ElTableColumn label="操作" width="140">
+          <template #default="{ row }">
+            <ElButton link size="small" @click="handleEdit(row)">编辑</ElButton>
+            <ElButton link type="danger" size="small" @click="handleDelete(row)">删除</ElButton>
+          </template>
+        </ElTableColumn>
+      </ElTable>
     </div>
 
-    <ElTable v-loading="loading" :data="list" border style="width: 100%">
-      <ElTableColumn label="名称" prop="name" min-width="140" />
-      <ElTableColumn label="类型" width="90">
-        <template #default="{ row }">
-          <ElTag :type="typeTagType(row.type)" size="small">{{ row.type }}</ElTag>
-        </template>
-      </ElTableColumn>
-      <ElTableColumn label="更新时间" min-width="160">
-        <template #default="{ row }">{{ formatDateTime(row.updatedAt || row.createdAt) }}</template>
-      </ElTableColumn>
-      <ElTableColumn label="操作" width="220" fixed="right">
-        <template #default="{ row }">
-          <ElButton type="primary" link @click="openEdit(row)">编辑</ElButton>
-          <ElButton type="success" link :loading="testingId === row.id" @click="handleTest(row)"
-            >测试</ElButton
-          >
-          <ElButton type="danger" link @click="handleDelete(row)">删除</ElButton>
-        </template>
-      </ElTableColumn>
-      <template #empty>
-        <ElEmpty description="暂无数据源" />
-      </template>
-    </ElTable>
+    <!-- 编辑/新建态 -->
+    <ElForm v-else label-position="top" size="small">
+      <ElFormItem label="名称">
+        <ElInput v-model="editForm.name" placeholder="数据源名称" />
+      </ElFormItem>
+      <ElFormItem label="类型">
+        <ElSelect v-model="editForm.type" style="width: 100%">
+          <ElOption label="静态（static）" value="static" />
+          <ElOption label="接口（api）" value="api" />
+        </ElSelect>
+      </ElFormItem>
+      <ElFormItem label="配置（JSON）">
+        <ElInput
+          :model-value="configText()"
+          type="textarea"
+          :autosize="{ minRows: 4, maxRows: 12 }"
+          :placeholder="editForm.type === 'api' ? '{&quot;url&quot;:&quot;https://...&quot;,&quot;method&quot;:&quot;GET&quot;}' : '{&quot;rows&quot;:[...]}'"
+          @update:model-value="(v: string) => handleConfigInput(v)"
+        />
+      </ElFormItem>
+      <div class="ds-dialog__edit-actions">
+        <ElButton size="small" @click="handleCancelEdit">取消</ElButton>
+        <ElButton size="small" type="primary" :loading="saving" @click="handleSave">
+          {{ editForm.id ? '保存' : '创建' }}
+        </ElButton>
+      </div>
+    </ElForm>
 
-    <!-- 测试结果行内提示 -->
-    <div v-for="r in Object.entries(testResults)" :key="r[0]" class="ds-test-result">
-      <ElTag :type="r[1].ok ? 'success' : 'danger'" size="small">
-        {{ r[1].ok ? '✓' : '✗' }} {{ r[1].message }}
-        {{ r[1].latencyMs != null ? `(${r[1].latencyMs}ms)` : '' }}
-      </ElTag>
-    </div>
-
-    <!-- 编辑/新建子弹窗 -->
-    <ElDialog
-      v-model="formVisible"
-      :title="editingId ? '编辑数据源' : '新建数据源'"
-      width="480px"
-      append-to-body
-    >
-      <ElForm :model="form" label-width="90px">
-        <ElFormItem label="名称" required>
-          <ElInput v-model="form.name" placeholder="如：商品列表 API" />
-        </ElFormItem>
-        <ElFormItem label="类型" required>
-          <ElSelect v-model="form.type" style="width: 100%">
-            <ElOption label="API 接口" value="api" />
-            <ElOption label="静态数据" value="static" />
-          </ElSelect>
-        </ElFormItem>
-        <template v-if="form.type === 'api'">
-          <ElFormItem label="URL" required>
-            <ElInput v-model="form.url" placeholder="https://api.example.com/items" />
-          </ElFormItem>
-          <ElFormItem label="请求方法">
-            <ElSelect v-model="form.method" style="width: 100%">
-              <ElOption label="GET" value="GET" />
-              <ElOption label="POST" value="POST" />
-            </ElSelect>
-          </ElFormItem>
-          <div class="ds-hint">headers 已配置的值出于安全不在编辑时回显，重新输入以修改</div>
-        </template>
-      </ElForm>
-      <template #footer>
-        <ElButton @click="formVisible = false">取消</ElButton>
-        <ElButton type="primary" :loading="formLoading" @click="submitForm">保存</ElButton>
-      </template>
-    </ElDialog>
+    <template #footer>
+      <ElButton @click="handleClose">关闭</ElButton>
+    </template>
   </ElDialog>
 </template>
 
-<style scoped>
-.ds-toolbar {
-  display: flex;
-  gap: 8px;
+<style lang="scss" scoped>
+.ds-dialog__toolbar {
   margin-bottom: 12px;
 }
-
-.ds-test-result {
-  margin-top: 4px;
+.ds-dialog__error {
+  color: #f56c6c;
+  margin-bottom: 12px;
 }
-
-.ds-hint {
-  margin: -8px 0 8px 90px;
+.ds-dialog__test-result {
+  margin-left: 8px;
   font-size: 12px;
-  color: #909399;
+  &.is-ok { color: #67c23a; }
+  &.is-fail { color: #f56c6c; }
+}
+.ds-dialog__edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>

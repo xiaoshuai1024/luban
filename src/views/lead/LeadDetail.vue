@@ -1,98 +1,250 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
-import { ElDrawer, ElDescriptions, ElDescriptionsItem, ElTag, ElMessage } from 'element-plus';
-import { getLeadDetail, LEAD_STATUS_MAP, type Lead } from '@/api/lead';
+import { ref, onMounted, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import {
+  ElButton,
+  ElCard,
+  ElDescriptions,
+  ElDescriptionsItem,
+  ElTag,
+  ElMessage,
+  ElMessageBox,
+  ElSkeleton,
+  ElAlert,
+} from 'element-plus'
+import {
+  getLead,
+  updateLeadStatus,
+  LEAD_STATUS_LABELS,
+  LEAD_STATUS_COLORS,
+  LEAD_STATUS_TRANSITIONS,
+  type LeadResponse,
+} from '@/api/lead'
+import { formatDateTime } from '@/utils/datetime'
+import { useUserStore } from '@/stores'
+import { AxiosError } from 'axios'
 
-/**
- * 线索详情抽屉（lead-capture-mvp）。
- * 展示单条线索的完整字段（contactMasked 已脱敏），不含明文联系方式。
- */
-const props = defineProps<{ siteId: string; leadId: string }>();
-const emit = defineEmits<{ close: [] }>();
+const route = useRoute()
+const router = useRouter()
+const userStore = useUserStore()
 
-const visible = ref(true);
-const loading = ref(false);
-const lead = ref<Lead | null>(null);
+const lead = ref<LeadResponse | null>(null)
+const loading = ref(true)
+const notFound = ref(false)
+const noPermission = ref(false)
+const transiting = ref(false)
+
+const siteId = computed(() => (route.params.siteId as string) || '')
+const leadId = computed(() => (route.params.id as string) || '')
+
+const transitionTargets = computed(() => {
+  if (!lead.value) return []
+  return LEAD_STATUS_TRANSITIONS[lead.value.status] ?? []
+})
 
 async function fetchDetail() {
-  loading.value = true;
+  loading.value = true
+  notFound.value = false
+  noPermission.value = false
   try {
-    const { data } = await getLeadDetail(props.siteId, props.leadId);
-    lead.value = data;
+    const { data } = await getLead(siteId.value, leadId.value)
+    lead.value = data
   } catch (e) {
-    ElMessage.error((e as Error).message || '加载详情失败');
+    const status = (e as AxiosError).response?.status
+    if (status === 404) {
+      notFound.value = true
+    } else if (status === 403) {
+      noPermission.value = true
+    }
+    lead.value = null
   } finally {
-    loading.value = false;
+    loading.value = false
   }
 }
 
-function statusTagType(status: string): string {
-  return LEAD_STATUS_MAP[status]?.type ?? 'info';
-}
-function statusLabel(status: string): string {
-  return LEAD_STATUS_MAP[status]?.label ?? status;
+async function handleTransit(targetStatus: string) {
+  if (!lead.value) return
+  const label = LEAD_STATUS_LABELS[targetStatus] ?? targetStatus
+  const confirmMsg =
+    targetStatus === 'converted'
+      ? `确定将此线索标记为「${label}」？此操作通常不可撤销。`
+      : `确定将线索状态变更为「${label}」？`
+
+  try {
+    await ElMessageBox.confirm(confirmMsg, '状态变更', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+
+  transiting.value = true
+  try {
+    const actorId = userStore.token ?? undefined
+    const { data } = await updateLeadStatus(siteId.value, leadId.value, {
+      status: targetStatus,
+      assigneeId: actorId,
+    })
+    lead.value = data
+    ElMessage.success(`状态已变更为「${label}」`)
+  } catch (e) {
+    ElMessage.error((e as Error).message || '状态变更失败')
+  } finally {
+    transiting.value = false
+  }
 }
 
-watch(
-  () => props.leadId,
-  () => fetchDetail(),
-  { immediate: true },
-);
+function goBack() {
+  router.back()
+}
+
+onMounted(fetchDetail)
 </script>
 
 <template>
-  <ElDrawer v-model="visible" title="线索详情" direction="rtl" size="480px" @close="emit('close')">
-    <div v-loading="loading">
-      <ElDescriptions v-if="lead" :column="1" border>
-        <ElDescriptionsItem label="姓名">{{ lead.contactMasked?.name || '—' }}</ElDescriptionsItem>
-        <ElDescriptionsItem label="手机号">{{
-          lead.contactMasked?.phone || '—'
-        }}</ElDescriptionsItem>
-        <ElDescriptionsItem v-if="lead.contactMasked?.email" label="邮箱">
-          {{ lead.contactMasked.email }}
-        </ElDescriptionsItem>
-        <ElDescriptionsItem v-if="lead.contactMasked?.source" label="来源">
-          {{ lead.contactMasked.source }}
-        </ElDescriptionsItem>
-        <ElDescriptionsItem label="状态">
-          <ElTag :type="statusTagType(lead.status)" size="small">{{
-            statusLabel(lead.status)
-          }}</ElTag>
-        </ElDescriptionsItem>
-        <ElDescriptionsItem label="来源表单">{{ lead.formName || lead.formId }}</ElDescriptionsItem>
-        <ElDescriptionsItem v-if="lead.channelId" label="渠道">{{
-          lead.channelId
-        }}</ElDescriptionsItem>
-        <ElDescriptionsItem v-if="lead.assigneeId" label="负责人">{{
-          lead.assigneeId
-        }}</ElDescriptionsItem>
-        <ElDescriptionsItem v-if="lead.sourceIp" label="来源IP">{{
-          lead.sourceIp
-        }}</ElDescriptionsItem>
-        <ElDescriptionsItem label="提交时间">{{ lead.createdAt }}</ElDescriptionsItem>
-        <ElDescriptionsItem v-if="lead.updatedAt" label="更新时间">{{
-          lead.updatedAt
-        }}</ElDescriptionsItem>
-        <ElDescriptionsItem v-if="lead.convertedAt" label="转化时间">{{
-          lead.convertedAt
-        }}</ElDescriptionsItem>
-        <ElDescriptionsItem v-if="lead.utm && Object.keys(lead.utm).length" label="UTM">
-          <div v-for="(v, k) in lead.utm" :key="k" class="lead-detail__utm">
-            <span class="lead-detail__utm-key">{{ k }}:</span> {{ v }}
-          </div>
-        </ElDescriptionsItem>
-      </ElDescriptions>
+  <div class="lead-detail">
+    <!-- Header -->
+    <div class="lead-detail__header">
+      <ElButton @click="goBack">← 返回列表</ElButton>
+      <h2 class="lead-detail__title">线索详情</h2>
     </div>
-  </ElDrawer>
+
+    <!-- Loading -->
+    <ElSkeleton v-if="loading" :rows="6" animated />
+
+    <!-- Not found -->
+    <ElAlert
+      v-if="notFound"
+      title="线索不存在"
+      type="warning"
+      show-icon
+      :closable="false"
+    />
+
+    <!-- No permission -->
+    <ElAlert
+      v-if="noPermission"
+      title="权限不足"
+      type="error"
+      show-icon
+      :closable="false"
+      description="当前账号没有线索管理权限"
+    />
+
+    <!-- Detail card -->
+    <template v-if="lead && !notFound && !noPermission">
+      <ElCard class="lead-detail__card">
+        <template #header>
+          <div class="lead-detail__card-header">
+            <span>联系人信息</span>
+            <ElTag :type="(LEAD_STATUS_COLORS[lead.status] as any) || 'info'" size="small">
+              {{ LEAD_STATUS_LABELS[lead.status] ?? lead.status }}
+            </ElTag>
+          </div>
+        </template>
+        <ElDescriptions :column="1" border>
+          <ElDescriptionsItem
+            v-for="(val, key) in lead.contactMasked"
+            :key="key"
+            :label="key"
+          >
+            {{ val }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="来源表单">
+            {{ lead.formName || '未知表单' }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="渠道">
+            {{ lead.utm?.source || '-' }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem v-if="lead.utm?.campaign" label="活动">
+            {{ lead.utm.campaign }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="来源 IP">
+            {{ lead.sourceIp || '-' }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="创建时间">
+            {{ formatDateTime(lead.createdAt) }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="更新时间">
+            {{ formatDateTime(lead.updatedAt) }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem v-if="lead.convertedAt" label="转化时间">
+            {{ formatDateTime(lead.convertedAt) }}
+          </ElDescriptionsItem>
+        </ElDescriptions>
+      </ElCard>
+
+      <!-- Status transitions -->
+      <ElCard v-if="transitionTargets.length > 0" class="lead-detail__card">
+        <template #header>
+          <span>状态变更</span>
+        </template>
+        <div class="lead-detail__transitions">
+          <ElButton
+            v-for="target in transitionTargets"
+            :key="target"
+            :type="target === 'converted' ? 'success' : target === 'lost' || target === 'invalid' ? 'danger' : 'primary'"
+            :loading="transiting"
+            @click="handleTransit(target)"
+          >
+            {{ LEAD_STATUS_LABELS[target] ?? target }}
+          </ElButton>
+        </div>
+      </ElCard>
+
+      <!-- UTM info -->
+      <ElCard v-if="lead.utm && Object.keys(lead.utm).length > 0" class="lead-detail__card">
+        <template #header>
+          <span>UTM 参数</span>
+        </template>
+        <ElDescriptions :column="1" border>
+          <ElDescriptionsItem
+            v-for="(val, key) in lead.utm"
+            :key="key"
+            :label="key"
+          >
+            {{ val }}
+          </ElDescriptionsItem>
+        </ElDescriptions>
+      </ElCard>
+    </template>
+  </div>
 </template>
 
-<style scoped>
-.lead-detail__utm {
-  font-size: 13px;
-  line-height: 1.6;
-}
+<style lang="scss" scoped>
+.lead-detail {
+  max-width: 800px;
+  margin: 0 auto;
 
-.lead-detail__utm-key {
-  color: #909399;
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+  }
+
+  &__card {
+    margin-bottom: 20px;
+  }
+
+  &__card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  &__transitions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
 }
 </style>

@@ -1,6 +1,5 @@
-import { createRouter, createWebHistory } from 'vue-router';
-import { getToken } from '@/api/request';
-import { useUserStore } from '@/stores/user';
+import { createRouter, createWebHistory } from 'vue-router'
+import { getToken } from '@/api/request'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -54,17 +53,18 @@ const router = createRouter({
           meta: { title: '页面编辑' },
         },
         {
-          path: 'sites/:siteId/pages/:pageId/preview',
-          name: 'PagePreview',
-          component: () => import('@/views/page/PagePreview.vue'),
-          meta: { title: '草稿预览' },
-        },
-        {
           path: 'sites/:siteId/leads',
           name: 'LeadList',
           component: () => import('@/views/lead/LeadList.vue'),
           meta: { title: '线索中心' },
         },
+        {
+          path: 'sites/:siteId/leads/:id',
+          name: 'LeadDetail',
+          component: () => import('@/views/lead/LeadDetail.vue'),
+          meta: { title: '线索详情' },
+        },
+        // === V2-T6 表单管理 ===
         {
           path: 'sites/:siteId/forms',
           name: 'FormList',
@@ -72,42 +72,73 @@ const router = createRouter({
           meta: { title: '表单管理' },
         },
         {
+          path: 'sites/:siteId/forms/new',
+          name: 'FormNew',
+          component: () => import('@/views/form/FormConfig.vue'),
+          meta: { title: '新建表单' },
+        },
+        {
+          path: 'sites/:siteId/forms/:id',
+          name: 'FormConfig',
+          component: () => import('@/views/form/FormConfig.vue'),
+          meta: { title: '编辑表单' },
+        },
+        // === V2-T7 CMS 内容集合 ===
+        {
+          path: 'sites/:siteId/collections',
+          name: 'CollectionList',
+          component: () => import('@/views/cms/CollectionList.vue'),
+          meta: { title: 'CMS 内容集合' },
+        },
+        {
           path: 'users',
           name: 'UserList',
           component: () => import('@/views/user/UserList.vue'),
-          meta: { title: '用户管理', requiresAdmin: true },
+          meta: { title: '用户管理' },
         },
         {
           path: 'settings',
           name: 'Settings',
           component: () => import('@/views/settings/Settings.vue'),
-          meta: { title: '系统设置', requiresAdmin: true },
+          meta: { title: '系统设置' },
+        },
+      ],
+    },
+    // 全屏沉浸式设计器（独立路由，不含侧边栏/顶栏）
+    {
+      path: '/designer',
+      component: () => import('@/layouts/DesignerLayout.vue'),
+      meta: { layout: 'designer' },
+      children: [
+        {
+          path: 'sites/:siteId/pages/new',
+          name: 'DesignerNew',
+          component: () => import('@/views/page/PageEditor.vue'),
+          meta: { title: '新建页面', isNew: true, designer: true },
+        },
+        {
+          path: 'sites/:siteId/pages/:pageId',
+          name: 'DesignerEditor',
+          component: () => import('@/views/page/PageEditor.vue'),
+          meta: { title: '页面编辑', designer: true },
         },
       ],
     },
   ],
-});
+})
 
 router.beforeEach((to, _from, next) => {
-  const token = getToken();
-  const isPublic = to.meta.public === true;
+  const token = getToken()
+  const isPublic = to.meta.public === true
   if (!isPublic && !token) {
-    next({ path: '/login' });
-    return;
-  }
-  // Wave 2: admin 路由守卫
-  if (to.meta.requiresAdmin === true) {
-    const userStore = useUserStore();
-    if (!userStore.isAdmin) {
-      next({ path: '/dashboard' });
-      return;
-    }
+    next({ path: '/login' })
+    return
   }
   if (to.path === '/login' && token) {
-    next({ path: '/dashboard' });
-    return;
+    next({ path: '/dashboard' })
+    return
   }
-  next();
-});
+  next()
+})
 
-export default router;
+export default router

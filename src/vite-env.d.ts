@@ -1,45 +1,28 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_API_BASE_URL: string;
+  readonly VITE_API_BASE_URL: string
+  // === FeatureGate（D15-D1）：默认全开，env='false'/'0' 关闭 ===
+  readonly VITE_FEATURE_STYLE?: string
+  readonly VITE_FEATURE_DATASOURCE_MANAGE?: string
+  readonly VITE_FEATURE_TEST_CONNECT?: string
+  readonly VITE_FEATURE_TREE_LOCK_HIDE?: string
+  readonly VITE_FEATURE_EVENTS?: string
+  readonly VITE_FEATURE_DATASOURCE?: string
+  // === V2 设计器 v2 FeatureGate（§5.3）===
+  readonly VITE_FEATURE_RESPONSIVE?: string
+  readonly VITE_FEATURE_ANIMATION?: string
+  readonly VITE_FEATURE_SEO?: string
+  readonly VITE_FEATURE_TEMPLATES?: string
+  readonly VITE_FEATURE_CMS?: string
+  readonly VITE_FEATURE_FORMS?: string
+  readonly VITE_FEATURE_VERSION_HISTORY?: string
+  readonly VITE_FEATURE_EXPORT?: string
+  readonly VITE_FEATURE_ANALYTICS?: string
+  readonly VITE_FEATURE_MULTI_SELECT?: string
+  readonly VITE_FEATURE_ALIGN_GUIDES?: string
 }
 
 interface ImportMeta {
-  readonly env: ImportMetaEnv;
-}
-
-/**
- * luban-low-code 动态 import 类型声明
- * 实际模块通过 pnpm link 挂载到 workspace，运行时由 Vite 解析
- * 此声明仅让 vue-tsc 编译时通过（实际类型从运行时模块获取）
- */
-declare module 'luban-low-code' {
-  export const LubanDesigner: unknown;
-  export const DesignerToolbar: unknown;
-  export const PropertyPanel: unknown;
-  export const ComponentPanel: unknown;
-  export const OutlineTree: unknown;
-  export const ContextMenu: unknown;
-  export const CodeEditor: unknown;
-  export const useHistory: (initial: unknown) => unknown;
-  export const getComponentMeta: (type: string) => unknown;
-  export const findNode: (root: unknown, id: string) => unknown;
-  export const removeNode: (root: unknown, id: string) => boolean;
-  export const duplicateNode: (root: unknown, id: string) => unknown;
-  export const moveNode: (root: unknown, id: string, dir: 'up' | 'down') => boolean;
-  export const insertNode: (
-    root: unknown,
-    node: unknown,
-    parentId: string,
-    index?: number,
-  ) => boolean;
-  export const updateNodeProps: (
-    root: unknown,
-    id: string,
-    patch: Record<string, unknown>,
-  ) => boolean;
-  export const bringToFront: (root: unknown, id: string) => boolean;
-  export const sendToBack: (root: unknown, id: string) => boolean;
-  export const genNodeId: (type: string) => string;
-  export const getPaletteGroups: () => unknown[];
+  readonly env: ImportMetaEnv
 }

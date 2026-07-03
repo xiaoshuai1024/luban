@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router';
-import { useUserStore } from '@/stores';
-import { logout } from '@/api/auth';
+import { useRouter } from 'vue-router'
+import { useUserStore } from '@/stores'
+import { logout } from '@/api/auth'
 import {
   ElContainer,
   ElAside,
@@ -13,23 +13,52 @@ import {
   ElDropdownItem,
   ElDropdownMenu,
   ElIcon,
-} from 'element-plus';
-import { DataBoard, Collection, User, Setting, ArrowRight } from '@element-plus/icons-vue';
+} from 'element-plus'
+import {
+  DataBoard,
+  Collection,
+  User,
+  Setting,
+  ChatDotSquare,
+  ArrowRight,
+  Document,
+  Files,
+} from '@element-plus/icons-vue'
 
-const router = useRouter();
-const userStore = useUserStore();
+const router = useRouter()
+const userStore = useUserStore()
 
 const menuItems = [
   { path: '/dashboard', title: '工作台', icon: DataBoard },
   { path: '/sites', title: '站点管理', icon: Collection },
+  { path: null, title: '线索中心', icon: ChatDotSquare, key: 'leads' },
+  { path: null, title: '表单管理', icon: Document, key: 'forms' },
+  { path: null, title: 'CMS 内容', icon: Files, key: 'cms' },
   { path: '/users', title: '用户管理', icon: User },
   { path: '/settings', title: '系统设置', icon: Setting },
-];
+]
+
+function getLeadsPath(): string {
+  const siteId = localStorage.getItem('luban_current_site_id')
+  return siteId ? `/sites/${siteId}/leads` : '/sites'
+}
+
+/** V2-T6 表单管理路径（与线索中心同样基于 current site） */
+function getFormsPath(): string {
+  const siteId = localStorage.getItem('luban_current_site_id')
+  return siteId ? `/sites/${siteId}/forms` : '/sites'
+}
+
+/** V2-T7 CMS 内容集合路径 */
+function getCollectionsPath(): string {
+  const siteId = localStorage.getItem('luban_current_site_id')
+  return siteId ? `/sites/${siteId}/collections` : '/sites'
+}
 
 function handleLogout() {
-  logout();
-  userStore.clearAuth();
-  router.push('/login');
+  logout()
+  userStore.clearAuth()
+  router.push('/login')
 }
 </script>
 
@@ -44,8 +73,17 @@ function handleLogout() {
         background-color="#304156"
         text-color="#bfcbd9"
         active-text-color="#409eff"
+        @select="(index: string) => {
+          if (index === 'leads') { router.push(getLeadsPath()); }
+          if (index === 'forms') { router.push(getFormsPath()); }
+          if (index === 'cms') { router.push(getCollectionsPath()); }
+        }"
       >
-        <ElMenuItem v-for="item in menuItems" :key="item.path" :index="item.path">
+        <ElMenuItem
+          v-for="item in menuItems"
+          :key="item.path || item.key"
+          :index="item.path || item.key"
+        >
           <ElIcon><component :is="item.icon" /></ElIcon>
           <span>{{ item.title }}</span>
         </ElMenuItem>
@@ -117,7 +155,7 @@ function handleLogout() {
   align-items: center;
   justify-content: space-between;
   background: #fff;
-  box-shadow: 0 1px 4px rgb(0 0 0 / 8%);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 
 .default-layout__title {

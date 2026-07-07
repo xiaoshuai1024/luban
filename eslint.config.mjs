@@ -46,7 +46,8 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': 'error',
       'vue/multi-word-component-names': 'off',
       'vue/no-v-html': 'warn',
-      'no-console': ['warn', { allow: ['warn', 'error'] }],
+      'no-console': ['error', { allow: ['warn', 'error'] }],
+      '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
 
@@ -111,7 +112,8 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': 'error',
       'vue/multi-word-component-names': 'off',
       'vue/no-v-html': 'warn',
-      'no-console': ['warn', { allow: ['warn', 'error'] }],
+      'no-console': ['error', { allow: ['warn', 'error'] }],
+      '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
 
